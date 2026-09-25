@@ -2477,7 +2477,7 @@ if(QT6)
     set_property(TARGET mixxx-lib PROPERTY ANDROID_ABIS "arm64-v8a")
     target_compile_definitions(
       mixxx-lib
-      PUBLIC ANDROID_PACKAGE_NAME="org.mixxx"
+      PUBLIC ANDROID_PACKAGE_NAME="org.mixxx.herculestest"
     )
     qt_add_executable(mixxx src/main.cpp MANUAL_FINALIZATION)
     set_property(
@@ -2486,7 +2486,7 @@ if(QT6)
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/packaging/android"
     )
     set_target_properties(mixxx PROPERTIES QT_ANDROID_ABIS "${ANDROID_ABI}")
-    set_target_properties(mixxx PROPERTIES QT_ANDROID_PACKAGE_NAME "org.mixxx")
+    set_target_properties(mixxx PROPERTIES QT_ANDROID_PACKAGE_NAME "org.mixxx.herculestest")
     set_target_properties(
       mixxx
       PROPERTIES QT_ANDROID_VERSION_NAME "${MIXXX_VERSION}"
