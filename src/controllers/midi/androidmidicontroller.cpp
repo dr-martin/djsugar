@@ -23,15 +23,21 @@ constexpr int kMidiMsgSize = 3;
 } // namespace
 
 AndroidMidiController::AndroidMidiController(const QString& name,
+        const QJniObject& midiDeviceInfo,
         const QJniObject& usbDevice,
         int interfaceNumber,
+        int inputPortIndex,
+        int outputPortIndex,
         uint16_t vendorId,
         uint16_t productId,
         const QString& vendorStr,
         const QString& productStr)
         : MidiController(name),
+          m_midiDeviceInfo(midiDeviceInfo),
           m_usbDevice(usbDevice),
           m_interfaceNumber(interfaceNumber),
+          m_inputPortIndex(inputPortIndex),
+          m_outputPortIndex(outputPortIndex),
           m_vendorId(vendorId),
           m_productId(productId),
           m_vendor(vendorStr),
@@ -44,8 +50,96 @@ AndroidMidiController::~AndroidMidiController() {
 
 int AndroidMidiController::open(const QString& resourcePath) {
     Q_UNUSED(resourcePath);
+
+    if (m_usingMidiManager || (m_pIoThread && m_pIoThread->isRunning())) {
+        return 0;
+    }
+
+    // Prefer Android's native MIDI API whenever the enumerator supplied a
+    // MidiDeviceInfo. This is the same API used by Android MIDI monitor apps
+    // and avoids competing with Android for the USB MIDI interface.
+    if (m_midiDeviceInfo.isValid()) {
+        return openWithMidiManager();
+    }
+
+    return openWithUsbBulk();
+}
+
+int AndroidMidiController::openWithMidiManager() {
+    QJniObject context = QNativeInterface::QAndroidApplication::context();
+    if (!context.isValid()) {
+        kLogger.warning() << "No Android context";
+        return 1;
+    }
+
+    QJniObject MIDI_SERVICE =
+            QJniObject::getStaticObjectField("android/content/Context",
+                    "MIDI_SERVICE",
+                    "Ljava/lang/String;");
+    auto midiManager = context.callObjectMethod("getSystemService",
+            "(Ljava/lang/String;)Ljava/lang/Object;",
+            MIDI_SERVICE.object());
+    if (!midiManager.isValid()) {
+        kLogger.warning() << "Cannot get Android MidiManager";
+        return 1;
+    }
+
+    m_midiHelper = QJniObject("org/mixxx/AndroidMidiHelper", "()V");
+    if (!m_midiHelper.isValid()) {
+        kLogger.warning() << "Cannot create AndroidMidiHelper";
+        return 1;
+    }
+
+    m_controllerId = mixxx::android::registerMidiController(this);
+    if (m_controllerId < 0) {
+        kLogger.warning() << "Cannot register Android MIDI controller";
+        m_midiHelper = QJniObject();
+        return 1;
+    }
+
+    const bool opened = m_midiHelper.callMethod<jboolean>("open",
+            "(Landroid/media/midi/MidiManager;"
+            "Landroid/media/midi/MidiDeviceInfo;I)Z",
+            midiManager.object(),
+            m_midiDeviceInfo.object(),
+            static_cast<jint>(m_controllerId));
+    if (!opened) {
+        kLogger.warning() << "Android MidiManager could not open" << getName();
+        mixxx::android::unregisterMidiController(m_controllerId);
+        m_controllerId = -1;
+        m_midiHelper = QJniObject();
+        return 1;
+    }
+
+    const bool portsOpened = m_midiHelper.callMethod<jboolean>("openPorts",
+            "(II)Z",
+            static_cast<jint>(m_inputPortIndex),
+            static_cast<jint>(m_outputPortIndex));
+    if (!portsOpened) {
+        kLogger.warning() << "Android MIDI ports could not be opened for" << getName();
+        m_midiHelper.callMethod<void>("close");
+        mixxx::android::unregisterMidiController(m_controllerId);
+        m_controllerId = -1;
+        m_midiHelper = QJniObject();
+        return 1;
+    }
+
+    m_usingMidiManager = true;
+    kLogger.info() << "Android MIDI controller opened through MidiManager:"
+                   << getName()
+                   << "input port:" << m_inputPortIndex
+                   << "output port:" << m_outputPortIndex;
+    return 0;
+}
+
+int AndroidMidiController::openWithUsbBulk() {
     if (m_pIoThread && m_pIoThread->isRunning()) {
         return 0;
+    }
+
+    if (!m_usbDevice.isValid() || m_interfaceNumber < 0) {
+        kLogger.warning() << "No usable USB MIDI device/interface";
+        return 1;
     }
 
     QJniObject context = QNativeInterface::QAndroidApplication::context();
@@ -67,7 +161,7 @@ int AndroidMidiController::open(const QString& resourcePath) {
         return 1;
     }
 
-    // Request USB permission
+    // Request USB permission for the raw-USB fallback path.
     if (!usbManager.callMethod<jboolean>("hasPermission",
                 "(Landroid/hardware/usb/UsbDevice;)Z",
                 m_usbDevice.object())) {
@@ -83,55 +177,50 @@ int AndroidMidiController::open(const QString& resourcePath) {
         }
     }
 
-    // Open USB device
+    // The fallback I/O thread owns the connection used for transfer. Do not
+    // claim the same interface here and then reopen it a second time.
     auto usbConnection = usbManager.callObjectMethod("openDevice",
             "(Landroid/hardware/usb/UsbDevice;)Landroid/hardware/usb/UsbDeviceConnection;",
             m_usbDevice.object());
-
     if (!usbConnection.isValid()) {
         kLogger.warning() << "Cannot open USB device";
         return 1;
     }
 
-    // Get file descriptor
-    jint usbFd = usbConnection.callMethod<jint>("getFileDescriptor");
+    const jint usbFd = usbConnection.callMethod<jint>("getFileDescriptor");
     if (usbFd < 0) {
         kLogger.warning() << "No file descriptor";
         return 1;
     }
 
-    // Claim the MIDI interface
-    auto usbInterface = m_usbDevice.callObjectMethod("getInterface",
-            "(I)Landroid/hardware/usb/UsbInterface;",
-            m_interfaceNumber);
-    if (usbInterface.isValid()) {
-        bool claimed = usbConnection.callMethod<jboolean>("claimInterface",
-                "(Landroid/hardware/usb/UsbInterface;Z)Z",
-                usbInterface.object(),
-                true);
-        if (!claimed) {
-            kLogger.warning() << "Cannot claim MIDI interface";
-            return 1;
-        }
-        kLogger.info() << "MIDI interface" << m_interfaceNumber << "claimed";
-    }
-
-    // Start I/O thread
     m_pIoThread = new IoThread(m_usbDevice,
             usbFd,
             m_interfaceNumber,
             this);
     m_pIoThread->start();
 
-    kLogger.info() << "Android MIDI controller opened:"
+    kLogger.info() << "Android MIDI controller opened via raw USB fallback:"
                    << getProductString() << "USB FD:" << usbFd;
     return 0;
 }
 
 int AndroidMidiController::close() {
+    if (m_usingMidiManager || m_midiHelper.isValid()) {
+        if (m_midiHelper.isValid()) {
+            m_midiHelper.callMethod<void>("close");
+        }
+        mixxx::android::unregisterMidiController(m_controllerId);
+        m_controllerId = -1;
+        m_usingMidiManager = false;
+        m_midiHelper = QJniObject();
+    }
+
     if (m_pIoThread) {
         m_pIoThread->stop();
-        m_pIoThread->wait(2000);
+        if (!m_pIoThread->wait(2000)) {
+            kLogger.warning() << "Android MIDI I/O thread did not stop within 2 seconds";
+            m_pIoThread->wait();
+        }
         delete m_pIoThread;
         m_pIoThread = nullptr;
     }
@@ -139,11 +228,11 @@ int AndroidMidiController::close() {
 }
 
 bool AndroidMidiController::poll() {
-    return m_pIoThread && m_pIoThread->isRunning();
+    return m_usingMidiManager || (m_pIoThread && m_pIoThread->isRunning());
 }
 
 bool AndroidMidiController::isPolling() const {
-    return m_pIoThread && m_pIoThread->isRunning();
+    return m_usingMidiManager || (m_pIoThread && m_pIoThread->isRunning());
 }
 
 void AndroidMidiController::sendShortMsg(
@@ -156,11 +245,85 @@ void AndroidMidiController::sendShortMsg(
 }
 
 bool AndroidMidiController::sendBytes(const QByteArray& data) {
+    if (m_usingMidiManager && m_midiHelper.isValid()) {
+        QJniEnvironment env;
+        jbyteArray jdata = env->NewByteArray(data.size());
+        if (!jdata) {
+            return false;
+        }
+        env->SetByteArrayRegion(jdata,
+                0,
+                data.size(),
+                reinterpret_cast<const jbyte*>(data.constData()));
+        m_midiHelper.callMethod<void>("send",
+                "([BII)V",
+                jdata,
+                static_cast<jint>(0),
+                static_cast<jint>(data.size()));
+        env->DeleteLocalRef(jdata);
+        return true;
+    }
+
     if (m_pIoThread && m_pIoThread->isRunning()) {
         m_pIoThread->send(data);
         return true;
     }
     return false;
+}
+
+void AndroidMidiController::receiveAndroidMidi(const QByteArray& data) {
+    // Android MidiReceiver supplies normal MIDI bytes (not USB-MIDI 4-byte
+    // event packets). Parse channel voice messages and feed Mixxx's normal
+    // MIDI input path so mappings and the Learning Wizard see them.
+    int pos = 0;
+    while (pos < data.size()) {
+        const auto status = static_cast<unsigned char>(data.at(pos));
+
+        if (status < 0x80) {
+            // Running status is uncommon for Android's USB MIDI translation.
+            // Skip orphan data rather than inventing a status byte.
+            ++pos;
+            continue;
+        }
+
+        if (status >= 0x80 && status <= 0xEF) {
+            const unsigned char opcode = status & 0xF0;
+            const int messageLength =
+                    (opcode == 0xC0 || opcode == 0xD0) ? 2 : 3;
+            if (pos + messageLength > data.size()) {
+                break;
+            }
+
+            const auto control =
+                    static_cast<unsigned char>(data.at(pos + 1));
+            const auto value = messageLength == 3
+                    ? static_cast<unsigned char>(data.at(pos + 2))
+                    : static_cast<unsigned char>(0);
+            receivedShortMessage(status,
+                    control,
+                    value,
+                    mixxx::Duration::fromMillis(0));
+            pos += messageLength;
+            continue;
+        }
+
+        if (status == 0xF0) {
+            const int end = data.indexOf(static_cast<char>(0xF7), pos + 1);
+            if (end >= 0) {
+                receive(data.mid(pos, end - pos + 1),
+                        mixxx::Duration::fromMillis(0));
+                pos = end + 1;
+            } else {
+                receive(data.mid(pos), mixxx::Duration::fromMillis(0));
+                break;
+            }
+            continue;
+        }
+
+        // Ignore real-time/system-common bytes here. They are not needed for
+        // controller mappings and can otherwise flood MIDI learn.
+        ++pos;
+    }
 }
 
 // ── IoThread ────────────────────────────────────────────────────
