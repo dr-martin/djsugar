@@ -16,11 +16,11 @@ public class AndroidMidiHelper {
     private static native void midiReceive(int controllerId, byte[] data,
         int offset, int count, long timestamp);
 
-    private MidiDevice mDevice;
+    private volatile MidiDevice mDevice;
     private MidiInputPort mInputPort;
     private MidiOutputPort mOutputPort;
-    private int mControllerId;
-    private boolean mOpenDone;
+    private volatile int mControllerId;
+    private volatile boolean mOpenDone;
 
     /**
      * Custom receiver that forwards incoming MIDI data to native code.
@@ -68,20 +68,59 @@ public class AndroidMidiHelper {
     }
 
     public boolean openPorts(int inIdx, int outIdx) {
-        if (mDevice == null) {
+        MidiDevice device = mDevice;
+        if (device == null) {
             return false;
         }
-        MidiDeviceInfo info = mDevice.getInfo();
-        if (inIdx >= 0 && inIdx < info.getInputPortCount()) {
-            mInputPort = mDevice.openInputPort(inIdx);
+
+        MidiDeviceInfo info = device.getInfo();
+
+        // A MidiInputPort is an input *to the device* (app -> controller).
+        if (inIdx >= 0) {
+            if (inIdx >= info.getInputPortCount()) {
+                return false;
+            }
+            mInputPort = device.openInputPort(inIdx);
+            if (mInputPort == null) {
+                return false;
+            }
         }
-        if (outIdx >= 0 && outIdx < info.getOutputPortCount()) {
-            mOutputPort = mDevice.openOutputPort(outIdx);
-        }
-        if (mOutputPort != null) {
+
+        // A MidiOutputPort is output *from the device* (controller -> app).
+        // Connect it to our receiver so button/jog/fader messages reach JNI.
+        if (outIdx >= 0) {
+            if (outIdx >= info.getOutputPortCount()) {
+                closePortsOnly();
+                return false;
+            }
+            mOutputPort = device.openOutputPort(outIdx);
+            if (mOutputPort == null) {
+                closePortsOnly();
+                return false;
+            }
             mOutputPort.connect(mNativeReceiver);
         }
-        return true;
+
+        return inIdx >= 0 || outIdx >= 0;
+    }
+
+    private void closePortsOnly() {
+        if (mInputPort != null) {
+            try {
+                mInputPort.close();
+            } catch (IOException e) {
+                Log.e(TAG, "input port close failed: " + e.getMessage());
+            }
+            mInputPort = null;
+        }
+        if (mOutputPort != null) {
+            try {
+                mOutputPort.close();
+            } catch (IOException e) {
+                Log.e(TAG, "output port close failed: " + e.getMessage());
+            }
+            mOutputPort = null;
+        }
     }
 
     public void send(byte[] data, int offset, int count) {
@@ -96,21 +135,16 @@ public class AndroidMidiHelper {
     }
 
     public void close() {
-        try {
-            if (mInputPort != null) {
-                mInputPort.close();
-                mInputPort = null;
+        closePortsOnly();
+
+        MidiDevice device = mDevice;
+        mDevice = null;
+        if (device != null) {
+            try {
+                device.close();
+            } catch (IOException e) {
+                Log.e(TAG, "device close failed: " + e.getMessage());
             }
-            if (mOutputPort != null) {
-                mOutputPort.close();
-                mOutputPort = null;
-            }
-            if (mDevice != null) {
-                mDevice.close();
-                mDevice = null;
-            }
-        } catch (IOException e) {
-            Log.e(TAG, "close failed: " + e.getMessage());
         }
     }
 }
