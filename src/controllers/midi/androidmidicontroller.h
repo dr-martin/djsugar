@@ -11,18 +11,27 @@
 
 #include "controllers/midi/midicontroller.h"
 
-/// Android MIDI controller — enumerates via MidiManager, I/O via USB bulk.
+/// Android MIDI controller.
+///
+/// Devices reported by Android MidiManager use Android's native MIDI API.
+/// UsbManager bulk I/O remains as a fallback for devices MidiManager cannot see.
 class AndroidMidiController : public MidiController {
     Q_OBJECT
   public:
     AndroidMidiController(const QString& name,
+            const QJniObject& midiDeviceInfo,
             const QJniObject& usbDevice,
             int interfaceNumber,
+            int inputPortIndex,
+            int outputPortIndex,
             uint16_t vendorId,
             uint16_t productId,
             const QString& vendorStr,
             const QString& productStr);
     ~AndroidMidiController() override;
+
+    /// Called from the JNI MidiReceiver bridge on this controller's Qt thread.
+    void receiveAndroidMidi(const QByteArray& data);
 
     PhysicalTransportProtocol getPhysicalTransportProtocol() const override {
         return PhysicalTransportProtocol::USB;
@@ -43,7 +52,9 @@ class AndroidMidiController : public MidiController {
         return {};
     }
     std::optional<uint8_t> getUsbInterfaceNumber() const override {
-        return std::nullopt;
+        return m_interfaceNumber >= 0
+                ? std::optional<uint8_t>(static_cast<uint8_t>(m_interfaceNumber))
+                : std::nullopt;
     }
 
   protected:
@@ -57,6 +68,9 @@ class AndroidMidiController : public MidiController {
     bool sendBytes(const QByteArray& data) override;
     bool poll() override;
     bool isPolling() const override;
+
+    int openWithMidiManager();
+    int openWithUsbBulk();
 
     class IoThread : public QThread {
       public:
@@ -84,8 +98,17 @@ class AndroidMidiController : public MidiController {
     };
 
     IoThread* m_pIoThread{nullptr};
+
+    QJniObject m_midiDeviceInfo;
+    QJniObject m_midiHelper;
     QJniObject m_usbDevice;
-    int m_interfaceNumber{0};
+
+    int m_interfaceNumber{-1};
+    int m_inputPortIndex{-1};
+    int m_outputPortIndex{-1};
+    int m_controllerId{-1};
+    bool m_usingMidiManager{false};
+
     uint16_t m_vendorId{0};
     uint16_t m_productId{0};
     QString m_vendor;
