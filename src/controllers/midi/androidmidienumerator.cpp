@@ -148,8 +148,11 @@ QList<Controller*> AndroidMidiEnumerator::queryDevices() {
                                        << "interface:" << midiIface;
 
                         auto* controller = new AndroidMidiController(name,
+                                QJniObject(),
                                 usbDevice,
                                 midiIface,
+                                -1,
+                                -1,
                                 static_cast<uint16_t>(vid),
                                 static_cast<uint16_t>(pid),
                                 vendorStr,
@@ -199,7 +202,7 @@ QList<Controller*> AndroidMidiEnumerator::queryDevices() {
             QJniObject nameStr = props.callObjectMethod("getString",
                     "(Ljava/lang/String;)Ljava/lang/String;",
                     QJniObject::fromString(
-                            "android.media.midi.extra.PROPERTY_NAME")
+                            "name")
                             .object());
             if (nameStr.isValid()) {
                 name = nameStr.toString();
@@ -208,7 +211,7 @@ QList<Controller*> AndroidMidiEnumerator::queryDevices() {
             QJniObject mfrStr = props.callObjectMethod("getString",
                     "(Ljava/lang/String;)Ljava/lang/String;",
                     QJniObject::fromString(
-                            "android.media.midi.extra.PROPERTY_MANUFACTURER")
+                            "manufacturer")
                             .object());
             if (mfrStr.isValid()) {
                 vendorStr = mfrStr.toString();
@@ -217,7 +220,7 @@ QList<Controller*> AndroidMidiEnumerator::queryDevices() {
             QJniObject prodStr = props.callObjectMethod("getString",
                     "(Ljava/lang/String;)Ljava/lang/String;",
                     QJniObject::fromString(
-                            "android.media.midi.extra.PROPERTY_PRODUCT")
+                            "product")
                             .object());
             if (prodStr.isValid()) {
                 productStr = prodStr.toString();
@@ -227,7 +230,7 @@ QList<Controller*> AndroidMidiEnumerator::queryDevices() {
             usbDevice = props.callObjectMethod("getParcelable",
                     "(Ljava/lang/String;)Landroid/os/Parcelable;",
                     QJniObject::fromString(
-                            "android.media.midi.extra.PROPERTY_USB_DEVICE")
+                            "usb_device")
                             .object());
             if (usbDevice.isValid()) {
                 vendorId = static_cast<uint16_t>(
@@ -248,37 +251,37 @@ QList<Controller*> AndroidMidiEnumerator::queryDevices() {
                                   .arg(vendorId, 4, 16, QChar('0'))
                                   .arg(productId, 4, 16, QChar('0'));
 
-        // Check USB interfaces for MIDI streaming (class 1, subclass 3)
+        // MidiManager already provides the transport. A USB descriptor is
+        // useful for metadata/fallback only; do not require or claim the USB
+        // interface when Android itself can deliver the MIDI stream.
         int ifaceNum = -1;
-
         if (usbDevice.isValid()) {
-            jint ifaceCount = usbDevice.callMethod<jint>("getInterfaceCount");
-            for (jint ifIdx = 0; ifIdx < ifaceCount; ifIdx++) {
+            const jint ifaceCount =
+                    usbDevice.callMethod<jint>("getInterfaceCount");
+            for (jint ifIdx = 0; ifIdx < ifaceCount; ++ifIdx) {
                 auto iface = usbDevice.callObjectMethod("getInterface",
                         "(I)Landroid/hardware/usb/UsbInterface;",
                         ifIdx);
-                jint ifaceClass = iface.callMethod<jint>("getInterfaceClass");
-                jint ifaceSubclass =
+                const jint ifaceClass =
+                        iface.callMethod<jint>("getInterfaceClass");
+                const jint ifaceSubclass =
                         iface.callMethod<jint>("getInterfaceSubclass");
                 if (ifaceClass == 1 && ifaceSubclass == 3) {
                     ifaceNum = ifIdx;
-                    kLogger.info()
-                            << "Found MIDI interface" << ifIdx
-                            << "on" << name;
                     break;
                 }
             }
         }
 
-        if (ifaceNum < 0) {
-            kLogger.info() << "No USB MIDI interface found for" << name
-                           << "- skipping (Bluetooth MIDI?)";
-            continue;
-        }
+        const int inputIdx = inputPorts > 0 ? 0 : -1;
+        const int outputIdx = outputPorts > 0 ? 0 : -1;
 
         auto* controller = new AndroidMidiController(name,
+                deviceInfo,
                 usbDevice,
                 ifaceNum,
+                inputIdx,
+                outputIdx,
                 vendorId,
                 productId,
                 vendorStr,
