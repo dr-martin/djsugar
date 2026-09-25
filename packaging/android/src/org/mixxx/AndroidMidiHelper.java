@@ -7,8 +7,14 @@ import android.media.midi.MidiManager;
 import android.media.midi.MidiOutputPort;
 import android.media.midi.MidiReceiver;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.util.Log;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 public class AndroidMidiHelper {
     private static final String TAG = "MixxxMidi";
@@ -18,9 +24,8 @@ public class AndroidMidiHelper {
 
     private volatile MidiDevice mDevice;
     private MidiInputPort mInputPort;
-    private MidiOutputPort mOutputPort;
+    private final List<MidiOutputPort> mOutputPorts = new ArrayList<>();
     private volatile int mControllerId;
-    private volatile boolean mOpenDone;
 
     /**
      * Custom receiver that forwards incoming MIDI data to native code.
@@ -47,24 +52,39 @@ public class AndroidMidiHelper {
     // Instance methods for device/port management
     public boolean open(MidiManager mgr, MidiDeviceInfo info, int controllerId) {
         mControllerId = controllerId;
-        mOpenDone = false;
+
+        // MidiManager.openDevice() is asynchronous. Use a dedicated looper for
+        // its callback instead of sleeping on whichever thread called us.
+        // This avoids deadlocking when the callback would otherwise be delivered
+        // on the same thread that is waiting for it.
+        HandlerThread callbackThread = new HandlerThread("MixxxMidiOpen");
+        callbackThread.start();
+        Handler callbackHandler = new Handler(callbackThread.getLooper());
+        CountDownLatch latch = new CountDownLatch(1);
+
         mgr.openDevice(info, new MidiManager.OnDeviceOpenedListener() {
             @Override
             public void onDeviceOpened(MidiDevice device) {
                 mDevice = device;
-                mOpenDone = true;
+                latch.countDown();
             }
-        }, null);
-        long deadline = System.currentTimeMillis() + 3000;
-        while (!mOpenDone && System.currentTimeMillis() < deadline) {
-            try {
-                Thread.sleep(10);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
+        }, callbackHandler);
+
+        boolean completed = false;
+        try {
+            completed = latch.await(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            callbackThread.quitSafely();
         }
-        return mDevice != null;
+
+        if (!completed || mDevice == null) {
+            Log.e(TAG, "openDevice timed out or failed for " + getDeviceName(info));
+            return false;
+        }
+
+        return true;
     }
 
     public boolean openPorts(int inIdx, int outIdx) {
@@ -73,35 +93,34 @@ public class AndroidMidiHelper {
             return false;
         }
 
+        closePortsOnly();
         MidiDeviceInfo info = device.getInfo();
 
-        // A MidiInputPort is an input *to the device* (app -> controller).
-        if (inIdx >= 0) {
-            if (inIdx >= info.getInputPortCount()) {
-                return false;
+        // For output from the controller to the app, listen to every output
+        // port. Multi-port DJ controllers often expose controls on a port other
+        // than port 0, which MIDI monitor apps handle automatically.
+        for (int i = 0; i < info.getOutputPortCount(); ++i) {
+            MidiOutputPort port = device.openOutputPort(i);
+            if (port != null) {
+                port.connect(mNativeReceiver);
+                mOutputPorts.add(port);
+                Log.i(TAG, "Listening to MIDI output port " + i);
+            } else {
+                Log.w(TAG, "Could not open MIDI output port " + i);
             }
-            mInputPort = device.openInputPort(inIdx);
+        }
+
+        // One device input port is enough for Mixxx LED/output messages.
+        if (info.getInputPortCount() > 0) {
+            int sendPort = (inIdx >= 0 && inIdx < info.getInputPortCount())
+                    ? inIdx : 0;
+            mInputPort = device.openInputPort(sendPort);
             if (mInputPort == null) {
-                return false;
+                Log.w(TAG, "Could not open MIDI input port " + sendPort);
             }
         }
 
-        // A MidiOutputPort is output *from the device* (controller -> app).
-        // Connect it to our receiver so button/jog/fader messages reach JNI.
-        if (outIdx >= 0) {
-            if (outIdx >= info.getOutputPortCount()) {
-                closePortsOnly();
-                return false;
-            }
-            mOutputPort = device.openOutputPort(outIdx);
-            if (mOutputPort == null) {
-                closePortsOnly();
-                return false;
-            }
-            mOutputPort.connect(mNativeReceiver);
-        }
-
-        return inIdx >= 0 || outIdx >= 0;
+        return !mOutputPorts.isEmpty() || mInputPort != null;
     }
 
     private void closePortsOnly() {
@@ -113,14 +132,15 @@ public class AndroidMidiHelper {
             }
             mInputPort = null;
         }
-        if (mOutputPort != null) {
+
+        for (MidiOutputPort port : mOutputPorts) {
             try {
-                mOutputPort.close();
+                port.close();
             } catch (IOException e) {
                 Log.e(TAG, "output port close failed: " + e.getMessage());
             }
-            mOutputPort = null;
         }
+        mOutputPorts.clear();
     }
 
     public void send(byte[] data, int offset, int count) {
