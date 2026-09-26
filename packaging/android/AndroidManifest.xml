@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="org.mixxx.herculestest"
+    package="org.mixxx.herculesmidi"
     android:installLocation="auto"
     android:versionCode="1"
     android:versionName="1.0">
@@ -49,7 +49,7 @@
         android:name="org.qtproject.qt.android.bindings.QtApplication"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="DJ Sugar"
+        android:label="DJ Sugar Hercules MIDI"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
         android:requestLegacyExternalStorage="true"
         android:allowBackup="true"
