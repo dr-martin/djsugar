@@ -43,12 +43,20 @@ class ControllerManager : public QObject {
     /// Prevent other parts of Mixxx from having to manually connect to our slots
     void setUpDevices() { emit requestSetUpDevices(); };
 
+    /// Reopen already configured controllers after Android changes the USB audio
+    /// route. This deliberately does not re-enumerate devices, because the
+    /// preferences dialog holds pointers to the existing Controller objects.
+    void reconnectControllersAfterAudioChange() {
+        emit requestReconnectControllersAfterAudioChange();
+    }
+
     static QList<QString> getMappingPaths(UserSettingsPointer pConfig);
 
   signals:
     void initialized();
     void devicesChanged();
     void requestSetUpDevices();
+    void requestReconnectControllersAfterAudioChange();
     void requestShutdown();
     void requestInitialize();
     void mappingApplied(bool applied);
@@ -66,6 +74,7 @@ class ControllerManager : public QObject {
     /// only runs on start-up but maybe should instead be signaled by the
     /// preferences dialog on apply, and only open/close changed devices
     void slotSetUpDevices();
+    void slotReconnectControllersAfterAudioChange();
     void slotShutdown();
     /// Calls poll() on all devices that have isPolling() true.
     void slotPollDevices();

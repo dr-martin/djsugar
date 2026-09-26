@@ -544,9 +544,19 @@ void collectInnerTubeVideos(const QJsonValue& node,
         const QJsonObject obj = node.toObject();
         const QJsonValue compact = obj.value(QStringLiteral("compactVideoRenderer"));
         const QJsonValue plain = obj.value(QStringLiteral("videoRenderer"));
+        const QJsonValue playlist =
+                obj.value(QStringLiteral("playlistVideoRenderer"));
+        const QJsonValue playlistPanel =
+                obj.value(QStringLiteral("playlistPanelVideoRenderer"));
         const QJsonObject video = compact.isObject()
                 ? compact.toObject()
-                : (plain.isObject() ? plain.toObject() : QJsonObject());
+                : (plain.isObject()
+                                  ? plain.toObject()
+                                  : (playlist.isObject()
+                                                    ? playlist.toObject()
+                                                    : (playlistPanel.isObject()
+                                                                      ? playlistPanel.toObject()
+                                                                      : QJsonObject())));
         if (!video.isEmpty()) {
             YouTubeVideoInfo info;
             info.id = video.value(QStringLiteral("videoId")).toString();
@@ -559,9 +569,21 @@ void collectInnerTubeVideos(const QJsonValue& node,
                         video.value(QStringLiteral("shortBylineText")).toObject());
             }
             info.uploader = uploader;
-            const int dur = parseTimestampToSeconds(innerTubeText(
+            int dur = parseTimestampToSeconds(innerTubeText(
                     video.value(QStringLiteral("lengthText")).toObject()));
-            // No lengthText -> live/upcoming/non-playable: skip it.
+            // Some playlist renderers expose a numeric lengthSeconds field
+            // instead of lengthText. Use it before deciding this is live.
+            if (dur < 0) {
+                bool ok = false;
+                const int lengthSeconds =
+                        video.value(QStringLiteral("lengthSeconds"))
+                                .toString()
+                                .toInt(&ok);
+                if (ok && lengthSeconds > 0) {
+                    dur = lengthSeconds;
+                }
+            }
+            // No usable duration -> live/upcoming/non-playable: skip it.
             info.isLive = dur < 0;
             info.durationSec = dur > 0 ? dur : 0;
             if (!info.isLive && isValidYouTubeVideoId(info.id) &&
@@ -980,12 +1002,20 @@ void YouTubeService::downloadVideo(const QString& videoId, const QString& cacheD
                 });
     }
 
-    // Primary: the YouTube InnerTube player API (same reliable, proxy-free path
-    // used for search). The Android client context returns plain (non-cipher)
-    // stream URLs valid for ~6 hours with no external dependencies. We only fall
-    // back to the (frequently-dead) Piped instances and then yt-dlp if every
-    // InnerTube client fails — this avoids the long stall the user hit while
-    // cycling through unreachable Piped hosts before each download.
+#if defined(Q_OS_ANDROID) && defined(HAVE_YTDLP_ANDROID)
+    // On Android use the maintained yt-dlp runtime as the primary downloader.
+    // YouTube now commonly requires PO tokens for direct media URLs; our
+    // hand-written InnerTube resolver deliberately does not implement that
+    // rapidly-changing challenge flow. yt-dlp does, and can update itself
+    // without rebuilding DJ Sugar.
+    kLogger.info() << "[Android] using bundled yt-dlp as primary downloader for"
+                   << videoId;
+    downloadViaAndroidBundled(videoId, cacheDir);
+    return;
+#endif
+
+    // Desktop primary: resolve through InnerTube first, then fall back to Piped
+    // and the standalone yt-dlp binary.
     downloadViaInnerTube(videoId,
             cacheDir,
             [this, videoId, cacheDir](const QString& innerTubeError) {
@@ -1438,6 +1468,131 @@ void YouTubeService::searchViaInnerTube(const QString& emittedQuery,
                     return;
                 }
                 Q_EMIT searchResultsReady(emittedQuery, results);
+            });
+}
+
+
+void YouTubeService::fetchPlaylist(const QString& playlistUrl, int cap) {
+    const QString source = playlistUrl.trimmed();
+    const QUrl url = QUrl::fromUserInput(source);
+    const QUrlQuery query(url);
+    const QString playlistId = query.queryItemValue(QStringLiteral("list"));
+
+    m_searchContinuationToken.clear();
+
+    if (playlistId.isEmpty()) {
+        Q_EMIT searchFailed(source, tr("No YouTube playlist id found in this link"));
+        return;
+    }
+
+    const QVector<InnerTubeClient>& clients = innerTubeSearchClients();
+    if (clients.isEmpty()) {
+        Q_EMIT searchFailed(source, tr("No YouTube client is available"));
+        return;
+    }
+
+    // Playlist browse works most consistently with the WEB client. Keep the
+    // first configured client as a fallback if WEB is not present.
+    int clientIndex = 0;
+    for (int i = 0; i < clients.size(); ++i) {
+        if (QString::fromLatin1(clients.at(i).clientName) ==
+                QStringLiteral("WEB")) {
+            clientIndex = i;
+            break;
+        }
+    }
+    const InnerTubeClient& c = clients.at(clientIndex);
+
+    const bool isMix = playlistId.startsWith(QStringLiteral("RD"));
+    QUrl reqUrl(isMix
+                    ? QStringLiteral("https://www.youtube.com/youtubei/v1/next")
+                    : QStringLiteral("https://www.youtube.com/youtubei/v1/browse"));
+    if (c.apiKey[0] != '\0') {
+        QUrlQuery apiQuery;
+        apiQuery.addQueryItem(QStringLiteral("key"),
+                QString::fromLatin1(c.apiKey));
+        reqUrl.setQuery(apiQuery);
+    }
+
+    QJsonObject clientCtx = innerTubeClientContext(c);
+    if (!m_visitorData.isEmpty()) {
+        clientCtx.insert(QStringLiteral("visitorData"), m_visitorData);
+    }
+    QJsonObject context;
+    context.insert(QStringLiteral("client"), clientCtx);
+
+    QJsonObject body;
+    body.insert(QStringLiteral("context"), context);
+    if (isMix) {
+        body.insert(QStringLiteral("playlistId"), playlistId);
+        // RD playlists are generated from a seed video. The last 11
+        // characters are the seed for ordinary RD<videoId> links, including
+        // links produced by YouTube's "Mix" / play-next share action.
+        const QString seedId = playlistId.right(11);
+        if (isValidYouTubeVideoId(seedId)) {
+            body.insert(QStringLiteral("videoId"), seedId);
+        }
+    } else {
+        const QString browseId = QStringLiteral("VL") + playlistId;
+        body.insert(QStringLiteral("browseId"), browseId);
+    }
+
+    QNetworkRequest req(reqUrl);
+    req.setHeader(QNetworkRequest::ContentTypeHeader,
+            QStringLiteral("application/json"));
+    req.setRawHeader("User-Agent", QByteArray(c.userAgent));
+    req.setTransferTimeout(kSearchTimeoutMs);
+    applyYouTubeRequestAttributes(&req);
+    applyBrowserFingerprint(&req, c.clientNameId);
+
+    kLogger.info() << "Importing YouTube playlist" << playlistId
+                   << (isMix ? "(Mix)" : "(playlist)");
+
+    QNetworkReply* reply =
+            m_pNam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply,
+            &QNetworkReply::finished,
+            this,
+            [this, reply, source, cap, playlistId]() {
+                const int httpStatus =
+                        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
+                                .toInt();
+                const QByteArray rawBody = reply->readAll();
+                reply->deleteLater();
+
+                if (reply->error() != QNetworkReply::NoError) {
+                    Q_EMIT searchFailed(source,
+                            tr("YouTube playlist request failed: %1")
+                                    .arg(reply->errorString()));
+                    return;
+                }
+
+                const QJsonObject root =
+                        QJsonDocument::fromJson(rawBody).object();
+                if (detectBotFlagging(httpStatus, root, rawBody)) {
+                    Q_EMIT searchFailed(source,
+                            tr("YouTube asked for verification while importing the playlist"));
+                    return;
+                }
+
+                QList<YouTubeVideoInfo> results =
+                        parseInnerTubeSearch(root, qMax(1, cap));
+                if (results.isEmpty()) {
+                    Q_EMIT searchFailed(source,
+                            tr("No playable tracks were found in playlist %1")
+                                    .arg(playlistId));
+                    return;
+                }
+
+                // Playlist continuation uses a different endpoint/body than
+                // search continuation. Keep infinite-scroll disabled for this
+                // first implementation rather than accidentally issuing a
+                // search continuation request with the wrong protocol.
+                m_searchContinuationToken.clear();
+
+                kLogger.info() << "Imported" << results.size()
+                               << "tracks from YouTube playlist" << playlistId;
+                Q_EMIT searchResultsReady(source, results);
             });
 }
 
@@ -2838,7 +2993,18 @@ void YouTubeService::downloadViaAndroidBundled(
                 "(Ljava/lang/String;Ljava/lang/String;)Lcom/yausername/youtubedl_android/"
                 "YoutubeDLRequest;",
                 QJniObject::fromString("-f").object(),
-                QJniObject::fromString("bestaudio").object());
+                QJniObject::fromString("bestaudio[ext=m4a]/bestaudio").object());
+        // Android's current Mixxx/FFmpeg packaging cannot reliably open
+        // WebM/Opus tracks from the cache. Force yt-dlp/FFmpeg to hand us an
+        // M4A/AAC file that the deck decoder supports consistently.
+        request.callMethod<QJniObject>("addOption",
+                "(Ljava/lang/String;)Lcom/yausername/youtubedl_android/YoutubeDLRequest;",
+                QJniObject::fromString("--extract-audio").object());
+        request.callMethod<QJniObject>("addOption",
+                "(Ljava/lang/String;Ljava/lang/String;)Lcom/yausername/youtubedl_android/"
+                "YoutubeDLRequest;",
+                QJniObject::fromString("--audio-format").object(),
+                QJniObject::fromString("m4a").object());
         request.callMethod<QJniObject>("addOption",
                 "(Ljava/lang/String;Ljava/lang/String;)Lcom/yausername/youtubedl_android/"
                 "YoutubeDLRequest;",

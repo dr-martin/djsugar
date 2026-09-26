@@ -133,6 +133,10 @@ ControllerManager::ControllerManager(UserSettingsPointer pConfig)
             &ControllerManager::requestSetUpDevices,
             this,
             &ControllerManager::slotSetUpDevices);
+    connect(this,
+            &ControllerManager::requestReconnectControllersAfterAudioChange,
+            this,
+            &ControllerManager::slotReconnectControllersAfterAudioChange);
     connect(this, &ControllerManager::requestShutdown, this, &ControllerManager::slotShutdown);
 
     // Signal that we should run slotInitialize once our event loop has started
@@ -340,6 +344,67 @@ void ControllerManager::slotSetUpDevices() {
     }
 
     pollIfAnyControllersOpen();
+}
+
+void ControllerManager::slotReconnectControllersAfterAudioChange() {
+    DEBUG_ASSERT_THIS_QOBJECT_THREAD_AFFINITY();
+
+#ifdef __ANDROID__
+    // Android may reset the MIDI side of a composite USB DJ controller when
+    // Oboe opens or changes the audio interface. Do not re-enumerate here:
+    // DlgPrefControllers owns UI objects that refer to the existing Controller
+    // instances. Instead close and reopen the configured instances in place.
+    QList<Controller*> controllersToReconnect;
+    {
+        const auto locker = lockMutex(&m_mutex);
+        for (Controller* pController : m_controllers) {
+            if (!pController) {
+                continue;
+            }
+            const QString deviceName = sanitizeDeviceName(pController->getName());
+            const bool enabled = m_pConfig->getValue(
+                    ConfigKey("[Controller]", deviceName), 0);
+            if (enabled && pController->getMapping()) {
+                controllersToReconnect.append(pController);
+            }
+        }
+    }
+
+    for (Controller* pController : std::as_const(controllersToReconnect)) {
+        if (pController->isOpen()) {
+            pController->close();
+        }
+    }
+    pollIfAnyControllersOpen();
+
+    if (controllersToReconnect.isEmpty()) {
+        return;
+    }
+
+    // Give Android's USB audio stack a short settling period before asking
+    // MidiManager for the same composite device again.
+    QTimer::singleShot(500, this, [this, controllersToReconnect]() {
+        for (Controller* pController : controllersToReconnect) {
+            if (!m_controllers.contains(pController)) {
+                continue;
+            }
+            const QString deviceName = sanitizeDeviceName(pController->getName());
+            if (!m_pConfig->getValue(ConfigKey("[Controller]", deviceName), 0)) {
+                continue;
+            }
+
+            const int result = pController->open(m_pConfig->getResourcePath());
+            if (result != 0) {
+                qWarning() << "Could not reconnect controller after Android audio change:"
+                           << pController->getName();
+            } else {
+                qDebug() << "Reconnected controller after Android audio change:"
+                         << pController->getName();
+            }
+        }
+        pollIfAnyControllersOpen();
+    });
+#endif
 }
 
 void ControllerManager::pollIfAnyControllersOpen() {

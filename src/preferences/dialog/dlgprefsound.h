@@ -39,6 +39,8 @@ class DlgPrefSound : public DlgPreferencePage, public Ui::DlgPrefSoundDlg {
     bool okayToClose() const override;
 
   signals:
+    /// Emitted after SoundManager accepted and opened a changed sound config.
+    void soundConfigApplied();
     void loadPaths(const SoundManagerConfig& config);
     void writePaths(SoundManagerConfig* config);
     void refreshOutputDevices(const QList<SoundDevicePointer>& devices);
