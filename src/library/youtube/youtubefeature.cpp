@@ -1487,12 +1487,23 @@ void YouTubeFeature::onDownloadFailed(const QString& videoId, const QString& err
         return;
     }
     // Exhausted retries — give up and clean up pending state.
+    const bool wasDeckLoad = m_pendingPlayerLoads.contains(videoId);
     m_downloadRetryCount.remove(videoId);
     m_pendingPlayerLoads.remove(videoId);
     m_pendingAutoDjLoads.remove(videoId);
     kLogger.warning() << "YouTube download failed for" << videoId
                       << "after" << kMaxDownloadRetries + 1
                       << "attempts:" << error;
+#if defined(Q_OS_ANDROID)
+    if (wasDeckLoad) {
+        QMessageBox::warning(nullptr,
+                tr("YouTube track could not be loaded"),
+                tr("DJ Sugar could not download this YouTube track.\n\n%1")
+                        .arg(error));
+    }
+#else
+    Q_UNUSED(wasDeckLoad);
+#endif
 }
 
 void YouTubeFeature::onTrackAnalysisProgress(

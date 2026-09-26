@@ -1002,12 +1002,20 @@ void YouTubeService::downloadVideo(const QString& videoId, const QString& cacheD
                 });
     }
 
-    // Primary: the YouTube InnerTube player API (same reliable, proxy-free path
-    // used for search). The Android client context returns plain (non-cipher)
-    // stream URLs valid for ~6 hours with no external dependencies. We only fall
-    // back to the (frequently-dead) Piped instances and then yt-dlp if every
-    // InnerTube client fails — this avoids the long stall the user hit while
-    // cycling through unreachable Piped hosts before each download.
+#if defined(Q_OS_ANDROID) && defined(HAVE_YTDLP_ANDROID)
+    // On Android use the maintained yt-dlp runtime as the primary downloader.
+    // YouTube now commonly requires PO tokens for direct media URLs; our
+    // hand-written InnerTube resolver deliberately does not implement that
+    // rapidly-changing challenge flow. yt-dlp does, and can update itself
+    // without rebuilding DJ Sugar.
+    kLogger.info() << "[Android] using bundled yt-dlp as primary downloader for"
+                   << videoId;
+    downloadViaAndroidBundled(videoId, cacheDir);
+    return;
+#endif
+
+    // Desktop primary: resolve through InnerTube first, then fall back to Piped
+    // and the standalone yt-dlp binary.
     downloadViaInnerTube(videoId,
             cacheDir,
             [this, videoId, cacheDir](const QString& innerTubeError) {
