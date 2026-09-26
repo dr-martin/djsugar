@@ -78,6 +78,12 @@ class YouTubeService : public QObject {
     /// initial result set is large enough for infinite scroll to work.
     void searchVideos(const QString& query, int cap = 25, int minResults = 0);
 
+    /// Import a public YouTube playlist or auto-generated Mix URL.
+    /// Results are returned through searchResultsReady() using the original
+    /// playlist URL as the query key, so the existing YouTube table can render
+    /// and load the tracks exactly like normal search results.
+    void fetchPlaylist(const QString& playlistUrl, int cap = 100);
+
     /// Fetch the next page of results for the most recent search() call.
     /// Uses the InnerTube continuation token stored from the last successful
     /// search response. Emits searchMoreReady(query, results) on success, or

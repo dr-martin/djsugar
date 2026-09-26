@@ -17,6 +17,7 @@
 #include <QTextBrowser>
 #include <QTimer>
 #include <QUrl>
+#include <QUrlQuery>
 
 #include "analyzer/analyzerscheduledtrack.h"
 #include "control/controlproxy.h"
@@ -49,6 +50,10 @@ constexpr int kSearchResultsMax = 50;
 #else
 constexpr int kSearchResultsMax = 100;
 #endif
+
+// Playlist imports are deliberately capped to keep a pasted radio/mix URL
+// from exploding into an unbounded dynamic queue on a phone.
+constexpr int kPlaylistResultsMax = 100;
 
 // Upper duration bound (seconds) for items shown in the trending/home feed.
 // The Greek "top songs" feed otherwise mixes in hour-long "megamix" / "best
@@ -1098,7 +1103,19 @@ void YouTubeFeature::searchAndActivate(const QString& query) {
         m_pTrackModel->setSearch(query);
     }
     replaceTrackTable({});
-    m_service.searchVideos(query, kSearchResultsMax, kSearchResultsMax);
+    const QUrl maybeUrl = QUrl::fromUserInput(query.trimmed());
+    const QString host = maybeUrl.host().toLower();
+    const QUrlQuery urlQuery(maybeUrl);
+    const bool isYouTubePlaylistUrl =
+            (host == QStringLiteral("youtube.com") ||
+                    host.endsWith(QStringLiteral(".youtube.com")) ||
+                    host == QStringLiteral("youtu.be")) &&
+            !urlQuery.queryItemValue(QStringLiteral("list")).isEmpty();
+    if (isYouTubePlaylistUrl) {
+        m_service.fetchPlaylist(query, kPlaylistResultsMax);
+    } else {
+        m_service.searchVideos(query, kSearchResultsMax, kSearchResultsMax);
+    }
 }
 
 void YouTubeFeature::onSearchResultsReady(
