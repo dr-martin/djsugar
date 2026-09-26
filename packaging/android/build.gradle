@@ -18,6 +18,15 @@ repositories {
 
 apply plugin: qtGradlePluginType
 
+// Kotlin 1.8+ folded the old jdk7/jdk8 extension jars into kotlin-stdlib.
+// youtubedl-android 0.18.1 still brings the 1.7.22 split artifacts through
+// transitive dependencies, while AndroidX resolves kotlin-stdlib 1.8.22.
+// Excluding the obsolete split jars prevents duplicate-class packaging errors.
+configurations.configureEach {
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
+}
+
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
     //noinspection GradleDependency
