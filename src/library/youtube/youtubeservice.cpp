@@ -2993,7 +2993,18 @@ void YouTubeService::downloadViaAndroidBundled(
                 "(Ljava/lang/String;Ljava/lang/String;)Lcom/yausername/youtubedl_android/"
                 "YoutubeDLRequest;",
                 QJniObject::fromString("-f").object(),
-                QJniObject::fromString("bestaudio").object());
+                QJniObject::fromString("bestaudio[ext=m4a]/bestaudio").object());
+        // Android's current Mixxx/FFmpeg packaging cannot reliably open
+        // WebM/Opus tracks from the cache. Force yt-dlp/FFmpeg to hand us an
+        // M4A/AAC file that the deck decoder supports consistently.
+        request.callMethod<QJniObject>("addOption",
+                "(Ljava/lang/String;)Lcom/yausername/youtubedl_android/YoutubeDLRequest;",
+                QJniObject::fromString("--extract-audio").object());
+        request.callMethod<QJniObject>("addOption",
+                "(Ljava/lang/String;Ljava/lang/String;)Lcom/yausername/youtubedl_android/"
+                "YoutubeDLRequest;",
+                QJniObject::fromString("--audio-format").object(),
+                QJniObject::fromString("m4a").object());
         request.callMethod<QJniObject>("addOption",
                 "(Ljava/lang/String;Ljava/lang/String;)Lcom/yausername/youtubedl_android/"
                 "YoutubeDLRequest;",

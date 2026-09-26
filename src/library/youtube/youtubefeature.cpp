@@ -1309,6 +1309,18 @@ void YouTubeFeature::requestDownloadFile(const QString& videoId) {
         if (isYouTubeSidecarFile(f)) {
             continue;
         }
+#if defined(Q_OS_ANDROID)
+        // Older Android builds downloaded bestaudio as WebM/Opus. The file is
+        // valid, but the Android deck decoder in this build cannot load it.
+        // Remove that stale cache entry so the new M4A path can redownload it.
+        if (QFileInfo(f).suffix().compare(QStringLiteral("webm"),
+                    Qt::CaseInsensitive) == 0) {
+            kLogger.info() << "[Android] removing incompatible cached WebM:"
+                           << dir.filePath(f);
+            QFile::remove(dir.filePath(f));
+            continue;
+        }
+#endif
         onDownloadFinished(videoId, dir.filePath(f));
         return;
     }
