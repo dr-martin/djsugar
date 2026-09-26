@@ -12,6 +12,7 @@
 #include <QStyle>
 #include <QtGlobal>
 
+#include "controllers/controllermanager.h"
 #include "controllers/dlgprefcontrollers.h"
 #include "library/library.h"
 #include "library/trackcollectionmanager.h"
@@ -108,6 +109,10 @@ DlgPreferences::DlgPreferences(
 
     // Construct page widgets and associated sidebar items
     m_pSoundDlg = std::make_unique<DlgPrefSound>(this, pSoundManager, m_pConfig);
+    connect(m_pSoundDlg.get(),
+            &DlgPrefSound::soundConfigApplied,
+            pControllerManager.get(),
+            &ControllerManager::reconnectControllersAfterAudioChange);
     m_soundPage = PreferencesPage(
             m_pSoundDlg.get(),
             new QTreeWidgetItem(contentsTreeWidget, QTreeWidgetItem::Type));

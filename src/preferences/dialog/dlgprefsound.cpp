@@ -482,6 +482,7 @@ void DlgPrefSound::slotApply() {
     } else {
         m_settingsModified = false;
         m_bLatencyChanged = false;
+        emit soundConfigApplied();
     }
 
 #ifdef __PIPEWIRE__

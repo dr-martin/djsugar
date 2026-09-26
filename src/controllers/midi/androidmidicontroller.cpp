@@ -49,20 +49,33 @@ AndroidMidiController::~AndroidMidiController() {
 }
 
 int AndroidMidiController::open(const QString& resourcePath) {
-    Q_UNUSED(resourcePath);
-
-    if (m_usingMidiManager || (m_pIoThread && m_pIoThread->isRunning())) {
+    if (isOpen()) {
         return 0;
     }
 
     // Prefer Android's native MIDI API whenever the enumerator supplied a
     // MidiDeviceInfo. This is the same API used by Android MIDI monitor apps
     // and avoids competing with Android for the USB MIDI interface.
-    if (m_midiDeviceInfo.isValid()) {
-        return openWithMidiManager();
+    const int result = m_midiDeviceInfo.isValid()
+            ? openWithMidiManager()
+            : openWithUsbBulk();
+    if (result != 0) {
+        return result;
     }
 
-    return openWithUsbBulk();
+    // Keep the Android implementation consistent with every other Mixxx
+    // controller backend: an open transport must also have a running mapping
+    // engine and must advertise itself as open. Without this, reconnecting the
+    // USB audio side can leave MIDI callbacks alive but the controller lifecycle
+    // in a half-open state.
+    startEngine();
+    if (!applyMapping(resourcePath)) {
+        kLogger.warning() << "Could not apply Android MIDI mapping for" << getName();
+        close();
+        return 1;
+    }
+    setOpen(true);
+    return 0;
 }
 
 int AndroidMidiController::openWithMidiManager() {
@@ -82,6 +95,52 @@ int AndroidMidiController::openWithMidiManager() {
     if (!midiManager.isValid()) {
         kLogger.warning() << "Cannot get Android MidiManager";
         return 1;
+    }
+
+    // Audio reconfiguration of a composite USB DJ controller may cause Android
+    // to refresh its logical MIDI device. Re-resolve MidiDeviceInfo before every
+    // open so a reconnect does not keep using a stale Java object.
+    const jint previousDeviceId = m_midiDeviceInfo.isValid()
+            ? m_midiDeviceInfo.callMethod<jint>("getId")
+            : -1;
+    QJniObject currentDeviceInfo;
+    QJniObject matchingNameDeviceInfo;
+    auto deviceInfoArray = midiManager.callObjectMethod(
+            "getDevices", "()[Landroid/media/midi/MidiDeviceInfo;");
+    if (deviceInfoArray.isValid()) {
+        QJniEnvironment env;
+        const jsize count = env->GetArrayLength(
+                static_cast<jobjectArray>(deviceInfoArray.object()));
+        const QJniObject nameKey = QJniObject::fromString("name");
+        for (jsize i = 0; i < count; ++i) {
+            QJniObject candidate = env->GetObjectArrayElement(
+                    static_cast<jobjectArray>(deviceInfoArray.object()), i);
+            if (!candidate.isValid()) {
+                continue;
+            }
+            if (candidate.callMethod<jint>("getId") == previousDeviceId) {
+                currentDeviceInfo = candidate;
+                break;
+            }
+            QJniObject props = candidate.callObjectMethod(
+                    "getProperties", "()Landroid/os/Bundle;");
+            if (!props.isValid()) {
+                continue;
+            }
+            QJniObject name = props.callObjectMethod(
+                    "getString",
+                    "(Ljava/lang/String;)Ljava/lang/String;",
+                    nameKey.object());
+            if (name.isValid() && name.toString() == getName()) {
+                matchingNameDeviceInfo = candidate;
+            }
+        }
+    }
+    if (!currentDeviceInfo.isValid()) {
+        currentDeviceInfo = matchingNameDeviceInfo;
+    }
+    if (currentDeviceInfo.isValid()) {
+        m_midiDeviceInfo = currentDeviceInfo;
     }
 
     m_midiHelper = QJniObject("org/mixxx/AndroidMidiHelper", "()V");
@@ -205,6 +264,13 @@ int AndroidMidiController::openWithUsbBulk() {
 }
 
 int AndroidMidiController::close() {
+    // Keep the transport available while the controller engine shuts down, in
+    // case a mapping sends final LED/state messages.
+    if (getScriptEngine()) {
+        stopEngine();
+    }
+    const int baseResult = MidiController::close();
+
     if (m_usingMidiManager || m_midiHelper.isValid()) {
         if (m_midiHelper.isValid()) {
             m_midiHelper.callMethod<void>("close");
@@ -224,7 +290,11 @@ int AndroidMidiController::close() {
         delete m_pIoThread;
         m_pIoThread = nullptr;
     }
-    return MidiController::close();
+
+    if (isOpen()) {
+        setOpen(false);
+    }
+    return baseResult;
 }
 
 bool AndroidMidiController::poll() {
