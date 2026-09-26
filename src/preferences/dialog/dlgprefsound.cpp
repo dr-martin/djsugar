@@ -647,6 +647,16 @@ void DlgPrefSound::loadSettings() {
 void DlgPrefSound::loadSettings(const SoundManagerConfig& config) {
     m_loading = true; // so settingsChanged ignores all our modifications here
     m_config = config;
+#ifdef Q_OS_ANDROID
+    // Older Android configs may have been saved with no API selected because
+    // Android had no platform default. Recover those configs automatically so
+    // the output-device combo boxes can actually be populated.
+    if (m_config.getAPI() == SoundManagerConfig::kAPINone &&
+            apiComboBox->count() > 1) {
+        m_config.setAPI(apiComboBox->itemData(1).toString());
+        refreshDevices();
+    }
+#endif
     int apiIndex = apiComboBox->findData(m_config.getAPI());
     if (apiIndex != -1) {
         apiComboBox->setCurrentIndex(apiIndex);
