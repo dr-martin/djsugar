@@ -1525,8 +1525,8 @@ void YouTubeService::fetchPlaylist(const QString& playlistUrl, int cap) {
             body.insert(QStringLiteral("videoId"), seedId);
         }
     } else {
-        body.insert(QStringLiteral("browseId"),
-                QStringLiteral("VL") + playlistId);
+        const QString browseId = QStringLiteral("VL") + playlistId;
+        body.insert(QStringLiteral("browseId"), browseId);
     }
 
     QNetworkRequest req(reqUrl);
