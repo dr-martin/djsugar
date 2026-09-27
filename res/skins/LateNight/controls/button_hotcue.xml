@@ -2,16 +2,16 @@
 <Template>
   <WidgetGroup>
     <ObjectName>Hotcue<Variable name="number"/></ObjectName>
-    <MinimumSize>26,26</MinimumSize>
-    <MaximumSize>26,26</MaximumSize>
+    <MinimumSize>40,40</MinimumSize>
+    <MaximumSize>40,40</MaximumSize>
     <SizePolicy>me,f</SizePolicy>
     <Layout>horizontal</Layout>
     <Children>
       <HotcueButton>
         <TooltipId>hotcue</TooltipId>
         <ObjectName>HotcueButton</ObjectName>
-        <MinimumSize>26,26</MinimumSize>
-        <MaximumSize>26,26</MaximumSize>
+        <MinimumSize>40,40</MinimumSize>
+        <MaximumSize>40,40</MaximumSize>
         <SizePolicy>me,f</SizePolicy>
         <Group><Variable name="Group"/></Group>
         <Hotcue><Variable name="number"/></Hotcue>
