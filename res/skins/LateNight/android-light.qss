@@ -1,0 +1,169 @@
+/*
+ * DJ Sugar Android light readability override
+ *
+ * Goal: improve daylight / phone-screen legibility without changing font sizes
+ * yet. Waveform canvases and VU meters intentionally stay dark because their
+ * coloured graphics depend on a dark background.
+ */
+
+/* Main surfaces */
+#SkinContainer,
+#ToolBar,
+#MainControls,
+#HeadphoneControls,
+#MixerDecks,
+#MixerContainer,
+#Deck1, #DeckCompact1, #DeckMini1,
+#Deck2, #DeckCompact2, #DeckMini2,
+#Deck3, #DeckCompact3, #DeckMini3,
+#Deck4, #DeckCompact4, #DeckMini4,
+#Sampler, #SamplerMini,
+#PreviewDeck,
+#LibrarySingleton,
+#LibraryFeatureControls,
+#SearchLineBox,
+#LibExpandBox,
+#SidebarBox,
+#SidebarCoverSplitter,
+#LibrarySplitter,
+WLibrary {
+  background-color: #e4e7eb;
+  color: #17191c;
+  border-color: #b5bbc2;
+}
+
+/* Library / YouTube / Tracks: highest-priority readability area */
+WTrackTableView,
+WLibrarySidebar,
+WLibraryTextBrowser,
+WSearchLineEdit,
+WTrackTableView QTableView,
+WTrackTableView QAbstractItemView {
+  background-color: #f7f8fa;
+  alternate-background-color: #eceff2;
+  color: #101214;
+  selection-background-color: #c7ddf2;
+  selection-color: #101214;
+  border-color: #aab0b7;
+}
+
+WTrackTableView::item:selected,
+WLibrarySidebar::item:selected,
+WLibraryTextBrowser::item:selected {
+  background-color: #c7ddf2;
+  color: #101214;
+}
+
+WTrackTableView::item:hover,
+WLibrarySidebar::item:hover {
+  background-color: #ddeaf6;
+  color: #101214;
+}
+
+/* Column headings */
+WTrackTableViewHeader,
+WTrackTableViewHeader::section,
+QHeaderView,
+QHeaderView::section {
+  background-color: #d8dde2;
+  color: #202327;
+  border-color: #aeb4ba;
+}
+
+/* Search fields and ordinary text-entry controls */
+WSearchLineEdit,
+QLineEdit,
+QSpinBox,
+QDoubleSpinBox,
+QComboBox,
+QAbstractSpinBox {
+  background-color: #ffffff;
+  color: #111315;
+  selection-background-color: #bcd8f0;
+  selection-color: #111315;
+  border-color: #9ea5ad;
+}
+
+/* Make light-on-dark labels readable after the panel background is lightened. */
+WLabel,
+WNumber,
+WNumberPos,
+WKey,
+WTime,
+WTrackProperty,
+WRecordingDuration,
+#LibraryFeatureControls QLabel,
+#LibraryFeatureControls QRadioButton,
+#LibraryFeatureControls QPushButton,
+#MainMenu,
+#MainMenu::item {
+  color: #1b1e22;
+}
+
+/* Keep loaded-track metadata strongly legible. */
+#TitleText, #TitleTextSmall,
+#ArtistText, #ArtistTextSmall,
+#BpmText, #BpmTextSmall,
+#KeyText, #KeyTextSmall,
+#DurationText,
+#PlayPositionText, #PlayPositionTextSmall,
+#RateText, #RateRangePrefix {
+  color: #111315;
+}
+
+/* Menus / tooltips / popup lists */
+QMenu,
+QMenu::item,
+QToolTip,
+WLibrarySidebar QMenu,
+WLibraryTextBrowser QMenu,
+WTrackMenu,
+WTrackMenu QMenu,
+WTrackTableViewHeader QMenu,
+WSearchLineEdit QAbstractItemView,
+QComboBox QAbstractItemView {
+  background-color: #f7f8fa;
+  color: #151719;
+  selection-background-color: #c7ddf2;
+  selection-color: #101214;
+  border-color: #aab0b7;
+}
+
+/* Simple neutral buttons; icon-bearing buttons keep their existing images. */
+#LibraryFeatureControls QPushButton,
+QDialog QPushButton,
+QMessageBox QPushButton {
+  background-color: #eceff2;
+  color: #151719;
+  border: 1px solid #aab0b7;
+  border-radius: 3px;
+}
+
+/* Preferences and dialogs should not inherit the phone's dark palette. */
+QDialog,
+QMessageBox,
+QDialog QLabel,
+QDialog QGroupBox,
+QDialog QCheckBox,
+QDialog QRadioButton,
+QDialog QTabWidget,
+QDialog QTabBar {
+  background-color: #f2f4f6;
+  color: #17191c;
+}
+
+/* Keep audio visualisation surfaces dark for contrast. */
+#WaveformsContainer,
+#WaveformsFrame,
+#WaveformBox1,
+#WaveformBox2,
+#WaveformBox3,
+#WaveformBox4,
+#OverviewBox,
+#OverviewBoxMini,
+#VuMeterBox,
+#VuMeterBoxMain,
+#VuMeterBoxMainSingle,
+#LatencyMeterBox {
+  background-color: #151719;
+}
