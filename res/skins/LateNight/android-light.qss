@@ -167,3 +167,170 @@ QDialog QTabBar {
 #LatencyMeterBox {
   background-color: #151719;
 }
+
+
+/* -------------------------------------------------------------------------
+ * Preferences: force a complete light palette.
+ *
+ * Some preferences pages are ordinary Qt widgets rather than skin widgets.
+ * On Android they can inherit white foreground colours from the dark system
+ * palette while our first readability pass already made their backgrounds
+ * light. Scope the override to DlgPreferencesDlg so every page has a known,
+ * high-contrast foreground/background pair.
+ * ------------------------------------------------------------------------- */
+#DlgPreferencesDlg,
+#DlgPreferencesDlg QWidget,
+#DlgPreferencesDlg QFrame,
+#DlgPreferencesDlg QStackedWidget,
+#DlgPreferencesDlg QScrollArea,
+#DlgPreferencesDlg QAbstractScrollArea,
+#DlgPreferencesDlg QAbstractScrollArea QWidget {
+  background-color: #f2f4f6;
+  color: #181b1f;
+}
+
+/* Left-hand preferences navigation. */
+#DlgPreferencesDlg #contentsTreeWidget,
+#DlgPreferencesDlg #contentsTreeWidget::viewport {
+  background-color: #ffffff;
+  color: #1a1d21;
+  alternate-background-color: #f1f3f5;
+  selection-background-color: #8fd33f;
+  selection-color: #102000;
+  border: 1px solid #aeb4ba;
+  outline: none;
+}
+#DlgPreferencesDlg #contentsTreeWidget::item {
+  color: #1a1d21;
+  background-color: transparent;
+}
+#DlgPreferencesDlg #contentsTreeWidget::item:selected {
+  color: #102000;
+  background-color: #8fd33f;
+}
+#DlgPreferencesDlg #contentsTreeWidget::item:hover:!selected {
+  color: #15181b;
+  background-color: #e4efda;
+}
+
+/* Page text and section labels. */
+#DlgPreferencesDlg QLabel,
+#DlgPreferencesDlg QGroupBox,
+#DlgPreferencesDlg QCheckBox,
+#DlgPreferencesDlg QRadioButton {
+  background-color: transparent;
+  color: #1c1f23;
+}
+#DlgPreferencesDlg QLabel:disabled,
+#DlgPreferencesDlg QGroupBox:disabled,
+#DlgPreferencesDlg QCheckBox:disabled,
+#DlgPreferencesDlg QRadioButton:disabled {
+  color: #686e75;
+}
+
+/* Text fields, selectors and number fields. */
+#DlgPreferencesDlg QLineEdit,
+#DlgPreferencesDlg QComboBox,
+#DlgPreferencesDlg QSpinBox,
+#DlgPreferencesDlg QDoubleSpinBox,
+#DlgPreferencesDlg QAbstractSpinBox,
+#DlgPreferencesDlg QTextEdit,
+#DlgPreferencesDlg QPlainTextEdit {
+  background-color: #ffffff;
+  color: #121416;
+  selection-background-color: #b8d7f0;
+  selection-color: #101214;
+  border: 1px solid #9299a1;
+}
+#DlgPreferencesDlg QLineEdit:disabled,
+#DlgPreferencesDlg QComboBox:disabled,
+#DlgPreferencesDlg QSpinBox:disabled,
+#DlgPreferencesDlg QDoubleSpinBox:disabled,
+#DlgPreferencesDlg QAbstractSpinBox:disabled,
+#DlgPreferencesDlg QTextEdit:disabled,
+#DlgPreferencesDlg QPlainTextEdit:disabled {
+  background-color: #e9ecef;
+  color: #5e646b;
+  border-color: #b8bdc3;
+}
+
+/* Native item views used by Library, Controllers and other preference pages. */
+#DlgPreferencesDlg QTreeView,
+#DlgPreferencesDlg QListView,
+#DlgPreferencesDlg QTableView,
+#DlgPreferencesDlg QAbstractItemView {
+  background-color: #ffffff;
+  alternate-background-color: #f0f2f4;
+  color: #171a1e;
+  selection-background-color: #c7ddf2;
+  selection-color: #101214;
+  border-color: #aab0b7;
+}
+#DlgPreferencesDlg QTreeView::item:selected,
+#DlgPreferencesDlg QListView::item:selected,
+#DlgPreferencesDlg QTableView::item:selected {
+  background-color: #c7ddf2;
+  color: #101214;
+}
+
+/* Headers and tabs. */
+#DlgPreferencesDlg QHeaderView,
+#DlgPreferencesDlg QHeaderView::section {
+  background-color: #d9dde1;
+  color: #202327;
+  border-color: #aeb4ba;
+}
+#DlgPreferencesDlg QTabWidget::pane {
+  background-color: #f2f4f6;
+  border: 1px solid #aeb4ba;
+}
+#DlgPreferencesDlg QTabBar::tab {
+  background-color: #dfe3e7;
+  color: #202327;
+  border: 1px solid #aeb4ba;
+  padding: 3px 7px;
+}
+#DlgPreferencesDlg QTabBar::tab:selected {
+  background-color: #ffffff;
+  color: #101214;
+}
+
+/* Buttons: dark text even when the Android palette says otherwise. */
+#DlgPreferencesDlg QPushButton,
+#DlgPreferencesDlg QToolButton,
+#DlgPreferencesDlg QDialogButtonBox QPushButton {
+  background-color: #f4f5f6;
+  color: #17191c;
+  border: 1px solid #9299a1;
+  border-radius: 2px;
+}
+#DlgPreferencesDlg QPushButton:disabled,
+#DlgPreferencesDlg QToolButton:disabled,
+#DlgPreferencesDlg QDialogButtonBox QPushButton:disabled {
+  background-color: #e5e8eb;
+  color: #747a81;
+  border-color: #bcc1c6;
+}
+
+/* Popup lists inherit their own palette on Android, so pin those too. */
+#DlgPreferencesDlg QComboBox QAbstractItemView {
+  background-color: #ffffff;
+  color: #171a1e;
+  selection-background-color: #c7ddf2;
+  selection-color: #101214;
+}
+
+/* Global safety net for standard light controls outside Preferences. */
+QLineEdit:disabled,
+QComboBox:disabled,
+QSpinBox:disabled,
+QDoubleSpinBox:disabled,
+QAbstractSpinBox:disabled {
+  background-color: #e9ecef;
+  color: #5e646b;
+}
+QListView,
+QTreeView,
+QTableView {
+  color: #171a1e;
+}
