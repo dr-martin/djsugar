@@ -839,3 +839,55 @@ QToolButton {
   font-size: 19px;
   min-height: 38px;
 }
+
+
+/* DJ SUGAR STREAMLINED PHONE MIXING LAYOUT
+ * Keep the phone interface bright and high-contrast. The skin settings panel
+ * is normally closed, but if opened it must remain readable in daylight.
+ */
+#SkinSettingsContainer,
+#SkinSettings,
+#SkinSettingsCategory,
+#DeckSizeSettings,
+#DeckSizeCover,
+#SkinSettingsSeparator {
+  background-color: #eef1f4;
+  color: #171a1e;
+  border-color: #b7bec6;
+}
+
+#CategoryLabel,
+#SkinSettingsLabelButton,
+#SkinSettingsButton,
+#SkinSettingsNumToggle,
+#SkinSettingsNumToggleHeader,
+#SkinSettingsMixerToggle,
+#SkinSettingsText {
+  background-color: #eef1f4;
+  color: #171a1e;
+  font-size: 20px;
+}
+
+#SkinSettingsButton[displayValue="1"],
+#SkinSettingsNumToggle[displayValue="1"],
+#SkinSettingsNumToggleHeader[displayValue="1"] {
+  background-color: #c7ddf2;
+  color: #0b0d0f;
+}
+
+/* Avoid large dark empty surfaces around the waveforms and decks. */
+#WaveformSplitter,
+#DecksMixerContainer {
+  background-color: #e4e7eb;
+  color: #17191c;
+}
+
+/* Give the music browser a clear light surface and keep it visually dominant. */
+#LibraryContainer,
+#LibrarySingleton,
+#SidebarBox,
+#LibrarySplitter,
+#SearchLineBox {
+  background-color: #f7f8fa;
+  color: #101214;
+}
