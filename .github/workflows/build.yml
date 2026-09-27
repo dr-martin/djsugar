@@ -403,25 +403,40 @@ jobs:
           echo "CMAKE_ARGS_EXTRA=${CMAKE_ARGS_EXTRA} -DAPPLE_CODESIGN_IDENTITY=${APPLE_CODESIGN_IDENTITY}" >> "${GITHUB_ENV}"
           echo "APPLE_CODESIGN_IDENTITY=${APPLE_CODESIGN_IDENTITY}" >> $GITHUB_ENV
 
+      - name: "[android] Restore persistent test signing key"
+        if: startsWith(matrix.artifacts_slug, 'android') && env.ANDROID_SIGNING_KEYSTORE_BASE64 == ''
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.android-signing/mixxx.keystore
+          key: djsugar-android-test-signing-v1
+
       - name: "[android] Setup signing key"
         if: startsWith(matrix.artifacts_slug, 'android')
         run: |
           if [ -z "${ANDROID_SIGNING_KEYSTORE_BASE64}" ]; then
-            # If no signing key is available (e.g running on a fork), generate a temporary key
-            keytool \
-              -genkey \
-              -keystore mixxx.keystore \
-              -alias mixxx \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 365 \
-              -keypass mixxxandroid \
-              -storepass mixxxandroid \
-              -dname "CN=${{ github.actor }}"
+            # Fork/test builds do not receive the upstream release key. Keep one
+            # private test keystore in the Actions cache instead of generating a
+            # brand-new identity on every run. This lets Android install future
+            # DJ Sugar test APKs as updates rather than rejecting them with
+            # "App not installed" because the signer changed.
+            mkdir -p "${{ github.workspace }}/.android-signing"
+            TEST_KEYSTORE="${{ github.workspace }}/.android-signing/mixxx.keystore"
+            if [ ! -f "${TEST_KEYSTORE}" ]; then
+              keytool \
+                -genkey \
+                -keystore "${TEST_KEYSTORE}" \
+                -alias mixxx \
+                -keyalg RSA \
+                -keysize 2048 \
+                -validity 3650 \
+                -keypass mixxxandroid \
+                -storepass mixxxandroid \
+                -dname "CN=dr-martin DJ Sugar test builds"
+            fi
             echo "QT_ANDROID_KEYSTORE_ALIAS=mixxx" >> $GITHUB_ENV
             echo "QT_ANDROID_KEYSTORE_KEY_PASS=mixxxandroid" >> $GITHUB_ENV
             echo "QT_ANDROID_KEYSTORE_STORE_PASS=mixxxandroid" >> $GITHUB_ENV
-            echo "QT_ANDROID_KEYSTORE_PATH=${{ github.workspace }}/mixxx.keystore" >> $GITHUB_ENV
+            echo "QT_ANDROID_KEYSTORE_PATH=${TEST_KEYSTORE}" >> $GITHUB_ENV
           else
             echo "${{ env.ANDROID_SIGNING_KEYSTORE_BASE64 }}" | base64 -d > ${{ github.workspace }}/mixxx.keystore
             echo "QT_ANDROID_KEYSTORE_ALIAS=mixxx" >> $GITHUB_ENV
