@@ -334,3 +334,134 @@ QTreeView,
 QTableView {
   color: #171a1e;
 }
+
+
+/* -------------------------------------------------------------------------
+ * Android phone readability: approximately 125% larger text/touch targets.
+ * Keep the waveform canvas dark and give the library enough row height to be
+ * comfortable on a touchscreen.
+ * ------------------------------------------------------------------------- */
+
+/* Small labels: 10-11 px upstream -> 13-14 px here */
+#KnobLabel,
+#FxKnobLabel,
+#FxButtonLabel,
+#RateRangeText,
+#LatencyLabel {
+  font-size: 13px;
+}
+
+WPushButton,
+#LibraryFeatureControls QPushButton,
+#RecDuration[highlight="0"],
+#RecDuration[highlight="1"] {
+  font-size: 14px;
+}
+
+/* 12-13 px upstream -> 15-16 px */
+#RateRangePrefix,
+#RecDuration[highlight="2"],
+#SamplerTitleMini,
+#EQKillButton,
+#SamplerBpmMini,
+#PreviewBPM,
+#LibraryFeatureControls QRadioButton {
+  font-size: 15px;
+}
+
+WKey,
+WEffectSelector,
+WEffectSelector QAbstractScrollArea,
+WEffectChainPresetSelector,
+WEffectChainPresetSelector QAbstractScrollArea,
+#fadeModeCombobox,
+#fadeModeCombobox QAbstractScrollArea,
+#LibraryFeatureControls QLabel,
+#SkinSettingsButton,
+#SkinSettingsNumToggle,
+#SkinSettingsMixerToggle,
+#SkinSettingsText {
+  font-size: 16px;
+}
+
+/* 14 px upstream -> 17 px */
+#PlayPositionTextSmall,
+#DurationText,
+#RateText,
+#SamplerBpm,
+#MicAuxLabel,
+#MicAuxLabelUnconfigured,
+#PreviewTitle,
+#PreviewLabel,
+WBeatSpinBox,
+#spinBoxTransition {
+  font-size: 17px;
+}
+
+/* Important deck/library information */
+#TitleTextSmall,
+#ArtistTextSmall,
+#PlayPositionText,
+#BpmText,
+#BpmTextSmall,
+#FxUnitLabel,
+#SamplerTitle,
+WTrackPropertyEditor,
+WTime,
+WRecordingDuration {
+  font-size: 20px;
+}
+
+#ArtistText,
+#TitleText {
+  font-size: 22px;
+}
+
+/* Library and YouTube browser: larger rows and readable text. */
+WTrackTableView,
+WLibrarySidebar,
+WLibraryTextBrowser,
+WSearchLineEdit,
+WTrackTableView QTableView,
+WTrackTableView QAbstractItemView {
+  font-size: 16px;
+}
+
+WTrackTableView::item,
+WLibrarySidebar::item,
+WLibraryTextBrowser::item {
+  padding: 4px 5px;
+}
+
+WTrackTableViewHeader,
+WTrackTableViewHeader::section,
+QHeaderView,
+QHeaderView::section {
+  font-size: 15px;
+  padding: 4px 5px;
+}
+
+WSearchLineEdit,
+QLineEdit,
+QSpinBox,
+QDoubleSpinBox,
+QComboBox,
+QAbstractSpinBox {
+  font-size: 16px;
+  min-height: 28px;
+}
+
+QMenu,
+QMenu::item,
+QToolTip {
+  font-size: 15px;
+}
+QMenu::item {
+  padding: 5px 10px;
+}
+
+#LibraryFeatureControls QPushButton {
+  min-height: 28px;
+  padding-left: 8px;
+  padding-right: 8px;
+}

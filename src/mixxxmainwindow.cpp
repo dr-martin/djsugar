@@ -205,6 +205,26 @@ void MixxxMainWindow::initialize() {
 
     UserSettingsPointer pConfig = m_pCoreServices->getSettings();
 
+#ifdef Q_OS_ANDROID
+    // DJ Sugar phone defaults: expose LateNight's built-in stacked deck
+    // waveforms so Deck 1 and Deck 2 can be beat-matched visually. Apply once,
+    // then leave the user's later choice alone.
+    const ConfigKey kAndroidVisualDefaults(
+            QStringLiteral("[DJ-Sugar-Android]"),
+            QStringLiteral("visual_defaults_v2"));
+    if (pConfig->getValueString(kAndroidVisualDefaults) != QStringLiteral("1")) {
+        pConfig->setValue(ConfigKey(QStringLiteral("[Skin]"),
+                                  QStringLiteral("show_waveforms")),
+                1);
+        // Give the two stacked waveforms roughly twice the old default height:
+        // ~110 px per deck instead of ~50 px, while retaining room for decks.
+        pConfig->setValue(ConfigKey(QStringLiteral("[Skin]"),
+                                  QStringLiteral("stackedWaveforms_splitSize")),
+                QStringLiteral("220,430"));
+        pConfig->setValue(kAndroidVisualDefaults, QStringLiteral("1"));
+    }
+#endif
+
     // Set the visibility of tooltips, default "1" = ON
     m_toolTipsCfg = pConfig->getValue(
             ConfigKey("[Controls]", "Tooltips"),
