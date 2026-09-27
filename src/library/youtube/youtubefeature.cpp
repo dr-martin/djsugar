@@ -1404,6 +1404,32 @@ void YouTubeFeature::onDownloadFinished(
             break;
         }
     }
+    // A download may finish after the user has started another search. In that
+    // case m_lastResults no longer contains this video and older code replaced
+    // the good placeholder metadata with the raw 11-character video id and an
+    // empty artist. Recover the existing table metadata before updating.
+    if (uploader.isEmpty() || title.isEmpty() || title == videoId ||
+            durationSec <= 0) {
+        QSqlQuery existing(m_pTrackCollection->database());
+        existing.prepare(QStringLiteral(
+                "SELECT artist, title, duration FROM youtube_library "
+                "WHERE comment = :comment LIMIT 1"));
+        existing.bindValue(QStringLiteral(":comment"), videoId);
+        if (existing.exec() && existing.next()) {
+            if (uploader.isEmpty()) {
+                uploader = existing.value(0).toString();
+            }
+            const QString existingTitle = existing.value(1).toString();
+            if ((title.isEmpty() || title == videoId) &&
+                    !existingTitle.isEmpty() && existingTitle != videoId) {
+                title = existingTitle;
+            }
+            if (durationSec <= 0) {
+                durationSec = existing.value(2).toInt();
+            }
+        }
+    }
+
     upsertDownloadedRow(videoId, localPath, title, uploader, durationSec);
 
     // Always register with the track collection so analysis runs and the DB
@@ -2159,8 +2185,10 @@ void YouTubeFeature::upsertDownloadedRow(const QString& videoId,
     upd.prepare(QStringLiteral(
             "UPDATE youtube_library SET "
             "location = :location, "
-            "title = :title, "
-            "artist = :artist, "
+            "title = CASE "
+            "  WHEN :title = '' OR :title = :comment THEN title "
+            "  ELSE :title END, "
+            "artist = CASE WHEN :artist = '' THEN artist ELSE :artist END, "
             "duration = COALESCE(NULLIF(duration, 0), :duration) "
             "WHERE comment = :comment"));
     upd.bindValue(QStringLiteral(":location"), localPath);

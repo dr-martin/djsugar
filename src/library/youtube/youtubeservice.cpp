@@ -911,19 +911,18 @@ void YouTubeService::searchVideos(const QString& query, int cap, int minResults)
             [this, query, cap](const QString& innerTubeError) {
                 const bool hasYtDlpFallback = !m_ytDlpPath.isEmpty();
 #if defined(Q_OS_ANDROID)
-                // On Android the community Piped instances are almost always
-                // dead, so cascading through all of them (5 instances × 3
-                // filters, ~10 s each) only adds ~100 s of stalling before
-                // search finally fails — the user-reported "clicking YouTube
-                // lags then shows nothing" symptom. InnerTube (ANDROID_VR →
-                // TVHTML5 → WEB) is the reliable search path on Android, so when
-                // it fails we go straight to the bundled/Termux yt-dlp if one is
-                // usable, otherwise surface the error immediately. The bundled
-                // ("android-bundled") runtime is download-only — it can't run a
-                // search — so it does not count here.
-                const bool canSearchViaYtDlp = hasYtDlpFallback &&
-                        (m_ytDlpPath != QStringLiteral("android-bundled"));
-                if (canSearchViaYtDlp) {
+                // Keep direct InnerTube as the fast path, but unlike the old
+                // Android build we can now use the bundled self-updating yt-dlp
+                // runtime for metadata searches too. This gives us a real
+                // fallback when YouTube changes InnerTube response shapes or
+                // temporarily blocks a client.
+                if (m_ytDlpPath == QStringLiteral("android-bundled")) {
+                    kLogger.warning()
+                            << "InnerTube search failed for" << query << ":"
+                            << innerTubeError
+                            << "— falling back to bundled yt-dlp search";
+                    searchViaAndroidBundled(query, cap);
+                } else if (hasYtDlpFallback) {
                     kLogger.warning()
                             << "InnerTube search failed for" << query << ":"
                             << innerTubeError << "— falling back to yt-dlp";
@@ -932,7 +931,7 @@ void YouTubeService::searchVideos(const QString& query, int cap, int minResults)
                     kLogger.warning()
                             << "InnerTube search failed for" << query << ":"
                             << innerTubeError
-                            << "— no usable fallback on Android, surfacing error";
+                            << "— no usable fallback on Android";
                     Q_EMIT searchFailed(query, innerTubeError);
                 }
 #else
@@ -1484,6 +1483,15 @@ void YouTubeService::fetchPlaylist(const QString& playlistUrl, int cap) {
         Q_EMIT searchFailed(source, tr("No YouTube playlist id found in this link"));
         return;
     }
+
+#if defined(Q_OS_ANDROID) && defined(HAVE_YTDLP_ANDROID)
+    if (m_ytDlpPath == QStringLiteral("android-bundled")) {
+        kLogger.info() << "[Android] importing playlist/Mix with bundled yt-dlp:"
+                       << playlistId;
+        fetchPlaylistViaAndroidBundled(source, cap);
+        return;
+    }
+#endif
 
     const QVector<InnerTubeClient>& clients = innerTubeSearchClients();
     if (clients.isEmpty()) {
@@ -2901,6 +2909,186 @@ void YouTubeService::downloadViaYtDlp(const QString& videoId, const QString& cac
 namespace {
 std::atomic<bool> s_ytdlpUpdateAttempted{false};
 } // namespace
+
+
+QList<YouTubeVideoInfo> parseBundledYtDlpEntries(
+        const QString& jsonText, int cap) {
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonText.toUtf8());
+    if (!doc.isObject()) {
+        return {};
+    }
+    const QJsonArray entries =
+            doc.object().value(QStringLiteral("entries")).toArray();
+    QList<YouTubeVideoInfo> results;
+    results.reserve(qMin(entries.size(), cap));
+    QSet<QString> seen;
+    for (const QJsonValue& value : entries) {
+        if (results.size() >= cap) {
+            break;
+        }
+        const QJsonObject entry = value.toObject();
+        YouTubeVideoInfo info;
+        info.id = entry.value(QStringLiteral("id")).toString();
+        info.title = entry.value(QStringLiteral("title")).toString();
+        info.uploader = entry.value(QStringLiteral("channel")).toString();
+        if (info.uploader.isEmpty()) {
+            info.uploader = entry.value(QStringLiteral("uploader")).toString();
+        }
+        const QJsonValue duration = entry.value(QStringLiteral("duration"));
+        if (duration.isDouble()) {
+            info.durationSec = qMax(0, static_cast<int>(duration.toDouble()));
+        }
+        info.isLive = isYtDlpLiveStream(entry);
+        if (!info.isLive && isValidYouTubeVideoId(info.id) &&
+                !info.title.isEmpty() && !seen.contains(info.id)) {
+            seen.insert(info.id);
+            results.append(info);
+        }
+    }
+    return results;
+}
+
+void YouTubeService::searchViaAndroidBundled(const QString& query, int cap) {
+    const QString source =
+            QStringLiteral("ytsearch%1:%2").arg(qMax(1, cap)).arg(query);
+    fetchFlatViaAndroidBundled(source, query, cap);
+}
+
+void YouTubeService::fetchPlaylistViaAndroidBundled(
+        const QString& source, int cap) {
+    fetchFlatViaAndroidBundled(source, source, cap);
+}
+
+void YouTubeService::fetchFlatViaAndroidBundled(
+        const QString& source, const QString& emittedQuery, int cap) {
+    QPointer<YouTubeService> guard(this);
+    QThread* thread = QThread::create([guard, source, emittedQuery, cap]() {
+        auto fail = [guard, emittedQuery](const QString& message) {
+            if (!guard) {
+                return;
+            }
+            QMetaObject::invokeMethod(
+                    guard,
+                    [guard, emittedQuery, message]() {
+                        if (guard) {
+                            Q_EMIT guard->searchFailed(emittedQuery, message);
+                        }
+                    },
+                    Qt::QueuedConnection);
+        };
+
+        QJniObject context = QNativeInterface::QAndroidApplication::context();
+        if (!context.isValid()) {
+            fail(QStringLiteral("No Android context for bundled yt-dlp"));
+            return;
+        }
+
+        QJniObject ytdl = QJniObject::callStaticObjectMethod(
+                "com/yausername/youtubedl_android/YoutubeDL",
+                "getInstance",
+                "()Lcom/yausername/youtubedl_android/YoutubeDL;");
+        if (!ytdl.isValid()) {
+            fail(QStringLiteral("Bundled yt-dlp is not available"));
+            return;
+        }
+
+        QJniEnvironment env;
+        ytdl.callMethod<void>(
+                "init", "(Landroid/content/Context;)V", context.object());
+        if (env.checkAndClearExceptions()) {
+            fail(QStringLiteral("Bundled yt-dlp initialization failed"));
+            return;
+        }
+
+        // Keep one self-update attempt shared with the downloader. A current
+        // yt-dlp extractor is essential because YouTube changes frequently.
+        if (!s_ytdlpUpdateAttempted.exchange(true)) {
+            QJniObject channel = QJniObject::getStaticObjectField(
+                    "com/yausername/youtubedl_android/YoutubeDL$UpdateChannel$STABLE",
+                    "INSTANCE",
+                    "Lcom/yausername/youtubedl_android/YoutubeDL$UpdateChannel$STABLE;");
+            if (channel.isValid()) {
+                ytdl.callObjectMethod(
+                        "updateYoutubeDL",
+                        "(Landroid/content/Context;"
+                        "Lcom/yausername/youtubedl_android/YoutubeDL$UpdateChannel;)"
+                        "Lcom/yausername/youtubedl_android/YoutubeDL$UpdateStatus;",
+                        context.object(),
+                        channel.object());
+            }
+            env.checkAndClearExceptions();
+        }
+
+        QJniObject request(
+                "com/yausername/youtubedl_android/YoutubeDLRequest",
+                "(Ljava/lang/String;)V",
+                QJniObject::fromString(source).object());
+        const char* requestClass =
+                "(Ljava/lang/String;)Lcom/yausername/youtubedl_android/"
+                "YoutubeDLRequest;";
+        const char* requestPairClass =
+                "(Ljava/lang/String;Ljava/lang/String;)"
+                "Lcom/yausername/youtubedl_android/YoutubeDLRequest;";
+
+        for (const QString& option : {
+                     QStringLiteral("--flat-playlist"),
+                     QStringLiteral("--skip-download"),
+                     QStringLiteral("--dump-single-json"),
+                     QStringLiteral("--ignore-errors"),
+                     QStringLiteral("--no-warnings"),
+                     QStringLiteral("--no-cache-dir"),
+                     QStringLiteral("--ignore-config")}) {
+            request.callMethod<QJniObject>(
+                    "addOption",
+                    requestClass,
+                    QJniObject::fromString(option).object());
+        }
+        request.callMethod<QJniObject>(
+                "addOption",
+                requestPairClass,
+                QJniObject::fromString("--playlist-end").object(),
+                QJniObject::fromString(QString::number(qMax(1, cap))).object());
+
+        QJniObject response = ytdl.callObjectMethod(
+                "execute",
+                "(Lcom/yausername/youtubedl_android/YoutubeDLRequest;)"
+                "Lcom/yausername/youtubedl_android/YoutubeDLResponse;",
+                request.object());
+        if (env.checkAndClearExceptions() || !response.isValid()) {
+            fail(QStringLiteral("Bundled yt-dlp could not read YouTube results"));
+            return;
+        }
+
+        QJniObject out = response.callObjectMethod(
+                "getOut", "()Ljava/lang/String;");
+        if (env.checkAndClearExceptions() || !out.isValid()) {
+            fail(QStringLiteral("Bundled yt-dlp returned no metadata"));
+            return;
+        }
+
+        const QList<YouTubeVideoInfo> results =
+                parseBundledYtDlpEntries(out.toString(), qMax(1, cap));
+        if (results.isEmpty()) {
+            fail(QStringLiteral("No playable YouTube tracks were found"));
+            return;
+        }
+
+        if (!guard) {
+            return;
+        }
+        QMetaObject::invokeMethod(
+                guard,
+                [guard, emittedQuery, results]() {
+                    if (guard) {
+                        Q_EMIT guard->searchResultsReady(emittedQuery, results);
+                    }
+                },
+                Qt::QueuedConnection);
+    });
+    thread->setParent(this);
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
 
 void YouTubeService::downloadViaAndroidBundled(
         const QString& videoId, const QString& cacheDir) {
