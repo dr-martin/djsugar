@@ -33,19 +33,19 @@
               <WidgetGroup>
                 <ObjectName>BpmTapContainer</ObjectName>
                 <!-- same width as total width of SyncBox children (40 + 22) -->
-                <Size>90f,60f</Size>
+                <Size>94f,66f</Size>
                 <Children>
                   <!-- BPM + rate -->
                   <WidgetGroup>
                     <ObjectName>AlignCenter</ObjectName>
                     <Pos>0,0</Pos>
                     <Layout>vertical</Layout>
-                    <Size>90f,60f</Size>
+                    <Size>94f,66f</Size>
                     <Children>
                       <Number>
                         <ObjectName>BpmText</ObjectName>
                         <TooltipId>visual_bpm</TooltipId>
-                        <Size>90f,32f</Size>
+                        <Size>94f,36f</Size>
                         <Alignment>center</Alignment>
                         <NumberOfDigits>2</NumberOfDigits>
                         <Connection>
@@ -65,7 +65,7 @@
                   <BpmEditor>
                     <TooltipId>visual_bpm_edit</TooltipId>
                     <Pos>0,0</Pos>
-                    <Size>90f,60f</Size>
+                    <Size>94f,66f</Size>
                     <Group><Variable name="Group"/></Group>
                   </BpmEditor>
                 </Children>
@@ -79,7 +79,7 @@
                   <PushButton>
                     <TooltipId>sync_enabled</TooltipId>
                     <ObjectName>SyncDeck</ObjectName>
-                    <Size>54f,36f</Size>
+                    <Size>60f,44f</Size>
                     <NumberStates>2</NumberStates>
                     <RightClickIsPushButton>true</RightClickIsPushButton>
                     <Connection>
@@ -94,7 +94,7 @@
                   <PushButton>
                     <TooltipId>sync_leader</TooltipId>
                     <ObjectName>SyncLeader</ObjectName>
-                    <Size>36f,36f</Size>
+                    <Size>44f,44f</Size>
                     <NumberStates>3</NumberStates>
                     <Connection>
                       <ConfigKey><Variable name="Group"/>,sync_leader</ConfigKey>
