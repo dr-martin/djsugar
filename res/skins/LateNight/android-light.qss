@@ -465,3 +465,223 @@ QMenu::item {
   padding-left: 8px;
   padding-right: 8px;
 }
+
+
+/* =========================================================================
+ * FINAL ANDROID READABILITY PASS
+ *
+ * LateNight's original PaleMoon rules use highly-specific selectors for a
+ * dark skin. The Android skin is light, so repeat the important selectors
+ * here with equal/higher specificity. This prevents pale text from surviving
+ * on light panels and makes the complete phone UI more consistent.
+ * ========================================================================= */
+
+/* Track table: strongest readability defaults, including delegate colors. */
+#LibrarySingleton WTrackTableView,
+#LibraryContainer WTrackTableView,
+WLibrary WTrackTableView {
+  background-color: #ffffff;
+  alternate-background-color: #edf1f4;
+  color: #0d1013;
+  selection-background-color: #b8d7f0;
+  selection-color: #0b0d0f;
+  qproperty-focusBorderColor: #26323c;
+  qproperty-trackPlayedColor: #3f474f;
+  qproperty-trackMissingColor: #a00020;
+  qproperty-dropIndicatorColor: #8a3c00;
+  outline: 1px solid #66717b;
+}
+#DlgMissing WTrackTableView {
+  qproperty-trackMissingColor: #a00020;
+}
+#LibrarySingleton WTrackTableView::item:selected,
+#LibraryContainer WTrackTableView::item:selected,
+WLibrary WTrackTableView::item:selected {
+  background-color: #b8d7f0;
+  color: #0b0d0f;
+}
+#LibrarySingleton WTrackTableView::item:!selected:focus,
+#LibraryContainer WTrackTableView::item:!selected:focus,
+WLibrary WTrackTableView::item:!selected:focus {
+  background-color: #e0eef9;
+  color: #0b0d0f;
+  outline: 1px solid #40515f;
+}
+#LibrarySingleton WTrackTableView QCheckBox:focus,
+#LibraryContainer WTrackTableView QCheckBox:focus {
+  outline: 1px solid #40515f;
+}
+
+/* Library tree, text pages and header. */
+#LibraryContainer WLibrarySidebar,
+#LibraryContainer WLibraryTextBrowser {
+  background-color: #ffffff;
+  alternate-background-color: #edf1f4;
+  color: #111417;
+  selection-background-color: #b8d7f0;
+  selection-color: #0b0d0f;
+}
+#LibraryContainer WLibrarySidebar::item:selected {
+  background-color: #b8d7f0;
+  color: #0b0d0f;
+}
+#LibraryContainer WTrackTableViewHeader,
+#LibraryContainer WTrackTableViewHeader::section {
+  background-color: #d8dde2;
+  color: #171b1f;
+  border-color: #929aa2;
+  font-weight: 600;
+}
+
+/* Search, editors, BPM/transition fields. */
+#LibraryContainer WSearchLineEdit,
+#LibraryContainer WTrackPropertyEditor,
+#LibraryContainer QLineEdit,
+#LibraryContainer QPlainTextEdit,
+#LibraryBPMSpinBox,
+#spinBoxTransition,
+#spinBoxRecentDays {
+  background-color: #ffffff;
+  color: #101316;
+  selection-background-color: #b8d7f0;
+  selection-color: #0b0d0f;
+  border-color: #77828c;
+}
+
+/* Exact deck selectors override the original ivory/cyan dark-skin palette. */
+#Deck1 #TitleText, #Deck1 #ArtistText, #Deck1 #BpmText, #Deck1 #KeyText,
+#Deck2 #TitleText, #Deck2 #ArtistText, #Deck2 #BpmText, #Deck2 #KeyText,
+#Deck3 #TitleText, #Deck3 #ArtistText, #Deck3 #BpmText, #Deck3 #KeyText,
+#Deck4 #TitleText, #Deck4 #ArtistText, #Deck4 #BpmText, #Deck4 #KeyText,
+#DeckCompact1 #TitleText, #DeckCompact1 #ArtistText, #DeckCompact1 #BpmText, #DeckCompact1 #KeyText,
+#DeckCompact2 #TitleText, #DeckCompact2 #ArtistText, #DeckCompact2 #BpmText, #DeckCompact2 #KeyText,
+#DeckCompact3 #TitleText, #DeckCompact3 #ArtistText, #DeckCompact3 #BpmText, #DeckCompact3 #KeyText,
+#DeckCompact4 #TitleText, #DeckCompact4 #ArtistText, #DeckCompact4 #BpmText, #DeckCompact4 #KeyText,
+#DeckMini1 #TitleTextSmall, #DeckMini1 #ArtistTextSmall, #DeckMini1 #BpmTextSmall, #DeckMini1 #KeyTextSmall,
+#DeckMini2 #TitleTextSmall, #DeckMini2 #ArtistTextSmall, #DeckMini2 #BpmTextSmall, #DeckMini2 #KeyTextSmall,
+#DeckMini3 #TitleTextSmall, #DeckMini3 #ArtistTextSmall, #DeckMini3 #BpmTextSmall, #DeckMini3 #KeyTextSmall,
+#DeckMini4 #TitleTextSmall, #DeckMini4 #ArtistTextSmall, #DeckMini4 #BpmTextSmall, #DeckMini4 #KeyTextSmall {
+  color: #111417;
+}
+
+#Deck1 #PlayPositionText, #Deck1 #DurationText,
+#Deck2 #PlayPositionText, #Deck2 #DurationText,
+#Deck3 #PlayPositionText, #Deck3 #DurationText,
+#Deck4 #PlayPositionText, #Deck4 #DurationText,
+#DeckCompact1 #PlayPositionText, #DeckCompact1 #DurationText,
+#DeckCompact2 #PlayPositionText, #DeckCompact2 #DurationText,
+#DeckCompact3 #PlayPositionText, #DeckCompact3 #DurationText,
+#DeckCompact4 #PlayPositionText, #DeckCompact4 #DurationText,
+#RateText, #RateRangePrefix, #RateRangeText,
+#PreviewLabel, #PreviewTitle, #PreviewBPM {
+  color: #252a2f;
+}
+
+/* Mixer / FX labels: no dark-skin grey on a light panel. */
+#KnobLabel,
+#FxKnobLabel,
+#FxButtonLabel,
+#FxUnitLabel,
+#MicAuxLabel,
+#MicAuxLabelUnconfigured,
+#LatencyLabel {
+  color: #252a2f;
+}
+
+/* Toolbar / top controls */
+#ToolBar #GuiToggleButton,
+#ToolBar #AiBroButton,
+#ToolBar #RecDuration,
+#ToolBar #BroadcastButton,
+#ToolBar #SkinSettingsToggle,
+#ToolBar WTime,
+#ToolBar #LatencyLabel {
+  color: #171b1f;
+  font-size: 14px;
+}
+#ToolBar #GuiToggleButton[displayValue="0"],
+#ToolBar #GuiToggleButton[displayValue="1"],
+#ToolBar #GuiToggleButton[displayValue="2"],
+#ToolBar #BroadcastButton[displayValue="0"],
+#ToolBar #SkinSettingsToggle[displayValue="0"],
+#ToolBar #SkinSettingsToggle[displayValue="1"] {
+  color: #171b1f;
+}
+
+/* Main menu and every common popup/editor should stay light and readable. */
+#MainMenu,
+#MainMenu::item,
+#MainMenu QMenu,
+#MainMenu QMenu::item,
+WTrackMenu,
+WTrackMenu::item,
+WTrackMenu QMenu,
+WTrackMenu QMenu::item,
+WCoverArtMenu,
+WCoverArtMenu::item,
+WCueMenuPopup,
+WCueMenuPopup QLabel,
+WCueMenuPopup QLineEdit,
+WLibrarySidebar QMenu,
+WLibrarySidebar QMenu::item,
+WLibraryTextBrowser QMenu,
+WLibraryTextBrowser QMenu::item,
+WTrackTableViewHeader QMenu,
+WTrackTableViewHeader QMenu::item,
+QLineEdit QMenu,
+QLineEdit QMenu::item,
+QPlainTextEdit QMenu,
+QPlainTextEdit QMenu::item {
+  background-color: #f7f8fa;
+  color: #16191d;
+}
+#MainMenu QMenu::item:selected,
+WTrackMenu::item:selected,
+WTrackMenu QMenu::item:selected,
+WCoverArtMenu::item:selected,
+WLibrarySidebar QMenu::item:selected,
+WLibraryTextBrowser QMenu::item:selected,
+WTrackTableViewHeader QMenu::item:selected,
+QLineEdit QMenu::item:selected,
+QPlainTextEdit QMenu::item:selected {
+  background-color: #c7ddf2;
+  color: #0b0d0f;
+}
+#MainMenu QMenu::item:disabled,
+WTrackMenu QMenu::item:disabled,
+WLibrarySidebar QMenu::item:disabled,
+WLibraryTextBrowser QMenu::item:disabled,
+QLineEdit QMenu::item:disabled,
+QPlainTextEdit QMenu::item:disabled {
+  color: #626971;
+}
+
+/* Larger, lighter library scrollbars are easier to see and grab by touch. */
+#LibraryContainer QScrollBar {
+  background-color: #e3e7ea;
+  color: #30363c;
+  border: 1px solid #bbc2c8;
+}
+#LibraryContainer QScrollBar:vertical {
+  width: 20px;
+}
+#LibraryContainer QScrollBar:horizontal {
+  height: 20px;
+}
+#LibraryContainer QScrollBar::handle:vertical,
+#LibraryContainer QScrollBar::handle:horizontal {
+  background-color: #89949e;
+  min-height: 36px;
+  min-width: 36px;
+}
+
+/* Skin/settings text which was intentionally dim in the original dark skin. */
+#SkinSettingsLabelButton,
+#CategoryLabel,
+#SkinSettingsButton,
+#SkinSettingsNumToggle,
+#SkinSettingsNumToggleHeader,
+#SkinSettingsMixerToggle,
+#SkinSettingsText {
+  color: #252a2f;
+}

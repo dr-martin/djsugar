@@ -1,9 +1,12 @@
 #include "mixxxmainwindow.h"
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QDebug>
 #include <QFileDialog>
+#include <QFont>
+#include <QFontMetrics>
 #include <QKeyEvent>
 #include <QOpenGLContext>
 #include <QStatusBar>
@@ -225,6 +228,46 @@ void MixxxMainWindow::initialize() {
     }
 #endif
 
+
+#ifdef Q_OS_ANDROID
+    // One comprehensive phone-readability default pass. The library has its
+    // own runtime font/row-height settings, so skin QSS alone cannot make the
+    // song list reliably larger. Apply and persist these defaults once.
+    const ConfigKey kAndroidReadabilityDefaults(
+            QStringLiteral("[DJ-Sugar-Android]"),
+            QStringLiteral("readability_defaults_v4"));
+    if (pConfig->getValueString(kAndroidReadabilityDefaults) != QStringLiteral("1")) {
+        QFont libraryFont = QApplication::font();
+        if (libraryFont.pointSizeF() > 0.0) {
+            libraryFont.setPointSizeF(
+                    qMax(14.0, libraryFont.pointSizeF() * 1.35));
+        } else {
+            const int currentPixels = libraryFont.pixelSize() > 0
+                    ? libraryFont.pixelSize()
+                    : 14;
+            libraryFont.setPixelSize(
+                    qMax(18, static_cast<int>(currentPixels * 1.35)));
+        }
+
+        const int libraryRowHeight =
+                qMax(34, QFontMetrics(libraryFont).height() + 10);
+        auto pLibrary = m_pCoreServices->getLibrary();
+        if (pLibrary) {
+            pLibrary->setFont(libraryFont);
+            pLibrary->setRowHeight(libraryRowHeight);
+        }
+
+        // Persist so every Library/YouTube/playlist table, including ones
+        // created later in the session, receives the same readable sizing.
+        pConfig->setValue(
+                ConfigKey(QStringLiteral("[Library]"), QStringLiteral("Font")),
+                libraryFont.toString());
+        pConfig->setValue(
+                ConfigKey(QStringLiteral("[Library]"), QStringLiteral("RowHeight")),
+                libraryRowHeight);
+        pConfig->setValue(kAndroidReadabilityDefaults, QStringLiteral("1"));
+    }
+#endif
     // Set the visibility of tooltips, default "1" = ON
     m_toolTipsCfg = pConfig->getValue(
             ConfigKey("[Controls]", "Tooltips"),
