@@ -98,7 +98,7 @@ QString androidLightPreferencesStyleSheet() {
 QDialog {
     background-color: #f2f4f6;
     color: #17191c;
-    font-size: 16px;
+    font-size: 20px;
 }
 QLabel, QGroupBox, QCheckBox, QRadioButton {
     color: #17191c;
@@ -119,8 +119,8 @@ QTreeWidget#contentsTreeWidget {
 QTreeWidget#contentsTreeWidget::item {
     color: #17191c;
     background-color: transparent;
-    padding: 5px 4px;
-    min-height: 26px;
+    padding: 8px 6px;
+    min-height: 40px;
 }
 QTreeWidget#contentsTreeWidget::item:selected {
     background-color: #8fd33f;
@@ -138,8 +138,8 @@ QTreeWidget#contentsTreeWidget::item:disabled {
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QAbstractSpinBox,
 QTextEdit, QPlainTextEdit {
     background-color: #ffffff;
-    font-size: 16px;
-    min-height: 28px;
+    font-size: 20px;
+    min-height: 40px;
     color: #121416;
     selection-background-color: #b9d7ef;
     selection-color: #101214;
@@ -202,7 +202,7 @@ QTabBar::tab:selected {
 QPushButton, QToolButton {
     background-color: #f4f5f6;
     font-size: 16px;
-    min-height: 30px;
+    min-height: 42px;
     padding: 3px 8px;
     color: #17191c;
     border: 1px solid #9299a1;
@@ -212,6 +212,13 @@ QPushButton:disabled, QToolButton:disabled {
     background-color: #e5e8eb;
     color: #62686f;
     border-color: #b5bbc1;
+}
+
+/* Touch-friendly checkbox/radio targets on Android. */
+QCheckBox::indicator,
+QRadioButton::indicator {
+    width: 24px;
+    height: 24px;
 }
 
 /* Scroll areas and page backgrounds */

@@ -4,11 +4,13 @@
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QDebug>
+#include <QDir>
 #include <QFileDialog>
 #include <QFont>
 #include <QFontMetrics>
 #include <QKeyEvent>
 #include <QOpenGLContext>
+#include <QStandardPaths>
 #include <QStatusBar>
 #include <QUrl>
 
@@ -235,22 +237,24 @@ void MixxxMainWindow::initialize() {
     // song list reliably larger. Apply and persist these defaults once.
     const ConfigKey kAndroidReadabilityDefaults(
             QStringLiteral("[DJ-Sugar-Android]"),
-            QStringLiteral("readability_defaults_v4"));
+            QStringLiteral("readability_defaults_v5"));
     if (pConfig->getValueString(kAndroidReadabilityDefaults) != QStringLiteral("1")) {
         QFont libraryFont = QApplication::font();
         if (libraryFont.pointSizeF() > 0.0) {
             libraryFont.setPointSizeF(
-                    qMax(14.0, libraryFont.pointSizeF() * 1.35));
+                    qMax(19.0, libraryFont.pointSizeF() * 1.60));
+            libraryFont.setWeight(QFont::Medium);
         } else {
             const int currentPixels = libraryFont.pixelSize() > 0
                     ? libraryFont.pixelSize()
                     : 14;
             libraryFont.setPixelSize(
-                    qMax(18, static_cast<int>(currentPixels * 1.35)));
+                    qMax(26, static_cast<int>(currentPixels * 1.60)));
+            libraryFont.setWeight(QFont::Medium);
         }
 
         const int libraryRowHeight =
-                qMax(34, QFontMetrics(libraryFont).height() + 10);
+                qMax(52, QFontMetrics(libraryFont).height() + 14);
         auto pLibrary = m_pCoreServices->getLibrary();
         if (pLibrary) {
             pLibrary->setFont(libraryFont);
@@ -266,6 +270,40 @@ void MixxxMainWindow::initialize() {
                 ConfigKey(QStringLiteral("[Library]"), QStringLiteral("RowHeight")),
                 libraryRowHeight);
         pConfig->setValue(kAndroidReadabilityDefaults, QStringLiteral("1"));
+    }
+#endif
+
+#ifdef Q_OS_ANDROID
+    // Make local-phone music usable without a first-run scavenger hunt through
+    // Preferences. Add only the normal Music and Download folders; do not scan
+    // all of /storage because large USB/SD volumes can hold tens of thousands
+    // of non-audio files. USB folders can still be added explicitly.
+    const ConfigKey kAndroidLocalDirs(
+            QStringLiteral("[DJ-Sugar-Android]"),
+            QStringLiteral("local_dirs_v1"));
+    if (pConfig->getValueString(kAndroidLocalDirs) != QStringLiteral("1")) {
+        const QStringList commonMusicDirs = {
+                QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
+                QStandardPaths::writableLocation(QStandardPaths::DownloadLocation),
+        };
+        auto pLibrary = m_pCoreServices->getLibrary();
+        bool storageIsReadable = false;
+        if (pLibrary) {
+            for (const QString& path : commonMusicDirs) {
+                if (path.isEmpty()) {
+                    continue;
+                }
+                const QFileInfo info(path);
+                if (!info.exists() || !info.isDir() || !info.isReadable()) {
+                    continue;
+                }
+                storageIsReadable = true;
+                pLibrary->requestAddDir(path, /*silent=*/true);
+            }
+        }
+        if (storageIsReadable) {
+            pConfig->setValue(kAndroidLocalDirs, QStringLiteral("1"));
+        }
     }
 #endif
     // Set the visibility of tooltips, default "1" = ON
