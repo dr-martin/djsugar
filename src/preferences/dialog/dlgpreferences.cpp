@@ -1,6 +1,7 @@
 #include "preferences/dialog/dlgpreferences.h"
 
 #include <QApplication>
+#include <QColor>
 #include <QDialog>
 #include <QEvent>
 #include <QMoveEvent>
@@ -54,6 +55,174 @@
 #include "util/darkappearance.h"
 #endif
 
+#ifdef Q_OS_ANDROID
+namespace {
+
+QPalette androidLightPreferencesPalette() {
+    QPalette palette = QApplication::palette();
+
+    const QColor window(QStringLiteral("#f2f4f6"));
+    const QColor text(QStringLiteral("#17191c"));
+    const QColor base(QStringLiteral("#ffffff"));
+    const QColor alternateBase(QStringLiteral("#edf0f2"));
+    const QColor button(QStringLiteral("#f4f5f6"));
+    const QColor borderText(QStringLiteral("#17191c"));
+    const QColor highlight(QStringLiteral("#8fd33f"));
+    const QColor highlightedText(QStringLiteral("#102000"));
+    const QColor disabledText(QStringLiteral("#62686f"));
+    const QColor disabledBase(QStringLiteral("#e5e8eb"));
+
+    palette.setColor(QPalette::Window, window);
+    palette.setColor(QPalette::WindowText, text);
+    palette.setColor(QPalette::Base, base);
+    palette.setColor(QPalette::AlternateBase, alternateBase);
+    palette.setColor(QPalette::Text, text);
+    palette.setColor(QPalette::Button, button);
+    palette.setColor(QPalette::ButtonText, borderText);
+    palette.setColor(QPalette::Highlight, highlight);
+    palette.setColor(QPalette::HighlightedText, highlightedText);
+    palette.setColor(QPalette::ToolTipBase, base);
+    palette.setColor(QPalette::ToolTipText, text);
+
+    palette.setColor(QPalette::Disabled, QPalette::WindowText, disabledText);
+    palette.setColor(QPalette::Disabled, QPalette::Text, disabledText);
+    palette.setColor(QPalette::Disabled, QPalette::ButtonText, disabledText);
+    palette.setColor(QPalette::Disabled, QPalette::Base, disabledBase);
+    palette.setColor(QPalette::Disabled, QPalette::Button, disabledBase);
+
+    return palette;
+}
+
+QString androidLightPreferencesStyleSheet() {
+    return QStringLiteral(R"QSS(
+QDialog {
+    background-color: #f2f4f6;
+    color: #17191c;
+}
+QLabel, QGroupBox, QCheckBox, QRadioButton {
+    color: #17191c;
+    background-color: transparent;
+}
+QLabel:disabled, QGroupBox:disabled, QCheckBox:disabled, QRadioButton:disabled {
+    color: #62686f;
+}
+
+/* Left-hand preferences tree */
+QTreeWidget#contentsTreeWidget {
+    background-color: #ffffff;
+    alternate-background-color: #edf0f2;
+    color: #17191c;
+    border: 1px solid #a8afb6;
+    outline: none;
+}
+QTreeWidget#contentsTreeWidget::item {
+    color: #17191c;
+    background-color: transparent;
+}
+QTreeWidget#contentsTreeWidget::item:selected {
+    background-color: #8fd33f;
+    color: #102000;
+}
+QTreeWidget#contentsTreeWidget::item:hover:!selected {
+    background-color: #e3efd8;
+    color: #17191c;
+}
+QTreeWidget#contentsTreeWidget::item:disabled {
+    color: #62686f;
+}
+
+/* Standard fields and selectors */
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QAbstractSpinBox,
+QTextEdit, QPlainTextEdit {
+    background-color: #ffffff;
+    color: #121416;
+    selection-background-color: #b9d7ef;
+    selection-color: #101214;
+    border: 1px solid #9299a1;
+}
+QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled,
+QDoubleSpinBox:disabled, QAbstractSpinBox:disabled,
+QTextEdit:disabled, QPlainTextEdit:disabled {
+    background-color: #e5e8eb;
+    color: #62686f;
+    border-color: #b5bbc1;
+}
+QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    color: #17191c;
+    selection-background-color: #c7ddf2;
+    selection-color: #101214;
+}
+
+/* Lists and tables on all preference pages */
+QTreeView, QListView, QTableView, QAbstractItemView {
+    background-color: #ffffff;
+    alternate-background-color: #edf0f2;
+    color: #17191c;
+    selection-background-color: #c7ddf2;
+    selection-color: #101214;
+}
+QTreeView::item:selected, QListView::item:selected, QTableView::item:selected {
+    background-color: #c7ddf2;
+    color: #101214;
+}
+QHeaderView::section {
+    background-color: #d9dde1;
+    color: #202327;
+    border: 1px solid #aeb4ba;
+}
+
+/* Tabs */
+QTabWidget::pane {
+    background-color: #f2f4f6;
+    border: 1px solid #aeb4ba;
+}
+QTabBar::tab {
+    background-color: #dfe3e7;
+    color: #202327;
+    border: 1px solid #aeb4ba;
+    padding: 3px 7px;
+}
+QTabBar::tab:selected {
+    background-color: #ffffff;
+    color: #101214;
+}
+
+/* Buttons */
+QPushButton, QToolButton {
+    background-color: #f4f5f6;
+    color: #17191c;
+    border: 1px solid #9299a1;
+    border-radius: 2px;
+}
+QPushButton:disabled, QToolButton:disabled {
+    background-color: #e5e8eb;
+    color: #62686f;
+    border-color: #b5bbc1;
+}
+
+/* Scroll areas and page backgrounds */
+QScrollArea, QScrollArea > QWidget > QWidget, QStackedWidget {
+    background-color: #f2f4f6;
+    color: #17191c;
+}
+)QSS");
+}
+
+void applyAndroidLightPreferencesStyle(QWidget* pWidget) {
+    const QPalette palette = androidLightPreferencesPalette();
+    pWidget->setPalette(palette);
+    pWidget->setStyleSheet(androidLightPreferencesStyleSheet());
+
+    const QList<QWidget*> children = pWidget->findChildren<QWidget*>();
+    for (QWidget* pChild : children) {
+        pChild->setPalette(palette);
+    }
+}
+
+} // namespace
+#endif
+
 DlgPreferences::DlgPreferences(
         std::shared_ptr<mixxx::ScreensaverManager> pScreensaverManager,
         std::shared_ptr<mixxx::skin::SkinLoader> pSkinLoader,
@@ -67,6 +236,13 @@ DlgPreferences::DlgPreferences(
           m_pConfig(pSettingsManager->settings()),
           m_pageSizeHint(QSize(0, 0)) {
     setupUi(this);
+#ifdef Q_OS_ANDROID
+    // Preferences are a separate top-level Qt window and therefore do not
+    // inherit the legacy skin stylesheet used by the main Mixxx window.
+    // Apply the Android readability palette directly here so both startup
+    // "Reconfigure" and Ctrl+P use the same high-contrast appearance.
+    applyAndroidLightPreferencesStyle(this);
+#endif
 #ifndef __VINYLCONTROL__
     Q_UNUSED(pVCManager);
 #endif
@@ -367,10 +543,17 @@ void DlgPreferences::changeEvent(QEvent* pEvent) {
         // Re-apply macOS system slider styles based on the current theme mode
         fixSliderStyle();
 
+#ifdef Q_OS_ANDROID
+        const QPalette appPalette = androidLightPreferencesPalette();
+        // Android theme changes must not restore a dark-system foreground on
+        // our light Preferences surfaces.
+        applyAndroidLightPreferencesStyle(this);
+#else
         const QPalette appPalette = QApplication::palette();
         if (palette() != appPalette) {
             setPalette(appPalette);
         }
+#endif
         // Update m_iconsPath based on the new palette's text color
         if (!Color::isDimColor(appPalette.text().color())) {
             m_iconsPath.setPath(":/images/preferences/light/");
