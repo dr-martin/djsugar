@@ -630,11 +630,16 @@ QStringList SoundSourceProviderFFmpeg::getSupportedFileTypes() const {
 SoundSourceProviderPriority SoundSourceProviderFFmpeg::getPriorityHint(
         const QString& supportedFileType) const {
     Q_UNUSED(supportedFileType)
-    // TODO: Increase priority to Default or even Higher for all
-    // supported and tested file types?
-    // Currently it is only used as a fallback after all other
-    // SoundSources failed to open a file or are otherwise unavailable.
+#ifdef Q_OS_ANDROID
+    // On Android prefer FFmpeg for all supported audio types. It has the
+    // MediaStore -> private-cache fallback needed for scoped storage, while
+    // specialized native providers often open /storage/... directly.
+    return SoundSourceProviderPriority::Highest;
+#else
+    // On desktop FFmpeg remains the generic fallback after specialized
+    // SoundSource implementations.
     return SoundSourceProviderPriority::Lowest;
+#endif
 }
 
 QString SoundSourceProviderFFmpeg::getVersionString() const {
