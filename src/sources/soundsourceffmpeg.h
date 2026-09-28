@@ -25,6 +25,11 @@ class SoundSourceFFmpeg : public SoundSource {
     void close() override;
 
     static QString formatErrorString(int errnum);
+#ifdef Q_OS_ANDROID
+    // Resolve a shared/removable-storage audio path to an app-private copy.
+    // This avoids Android scoped-storage failures in native decoders.
+    static QString prepareAndroidPrivateCopy(const QString& sourcePath);
+#endif
 
     // The following static functions are used by children and closely related
     // classes, this is why these static methods aren't defined as protected.
