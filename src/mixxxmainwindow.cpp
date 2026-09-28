@@ -906,17 +906,22 @@ void MixxxMainWindow::initialize() {
     // onto Deck 1 or Deck 2 without needing its own copy of the music files.
     auto* pRemoteLibraryServer =
             new AndroidRemoteLibraryServer(m_pCoreServices, this);
-    auto* pRemoteLibraryButton = new QPushButton(tr("REMOTE"), this);
-    pRemoteLibraryButton->setMinimumHeight(36);
-    pRemoteLibraryButton->setStyleSheet(QStringLiteral(
+    m_pRemoteLibraryButton = new QPushButton(tr("REMOTE"), m_pCentralWidget);
+    m_pRemoteLibraryButton->setFixedSize(116, 42);
+    m_pRemoteLibraryButton->setStyleSheet(QStringLiteral(
             "QPushButton { background:#1d2328; color:#ffffff; "
-            "border:1px solid #69737c; padding:5px 12px; "
-            "font-size:15px; font-weight:600; } "
+            "border:2px solid #8a949d; border-radius:5px; padding:5px 12px; "
+            "font-size:17px; font-weight:700; } "
             "QPushButton:pressed { background:#33414d; }"));
-    statusBar()->addPermanentWidget(pRemoteLibraryButton);
+    m_pRemoteLibraryButton->move(
+            qMax(8, m_pCentralWidget->width() - m_pRemoteLibraryButton->width() - 12),
+            12);
+    m_pRemoteLibraryButton->raise();
+    m_pRemoteLibraryButton->show();
+    m_pCentralWidget->installEventFilter(this);
 
     if (pRemoteLibraryServer->start()) {
-        connect(pRemoteLibraryButton,
+        connect(m_pRemoteLibraryButton,
                 &QPushButton::clicked,
                 this,
                 [this, pRemoteLibraryServer]() {
@@ -932,8 +937,8 @@ void MixxxMainWindow::initialize() {
                             this, tr("DJ Sugar Remote Bibliotheek"), message);
                 });
     } else {
-        pRemoteLibraryButton->setEnabled(false);
-        pRemoteLibraryButton->setToolTip(
+        m_pRemoteLibraryButton->setEnabled(false);
+        m_pRemoteLibraryButton->setToolTip(
                 tr("Remote bibliotheek kon niet worden gestart."));
     }
 #endif
@@ -1968,6 +1973,17 @@ void MixxxMainWindow::tryParseAndSetDefaultStyleSheet() {
 
 /// Catch ToolTip and WindowStateChange events
 bool MixxxMainWindow::eventFilter(QObject* obj, QEvent* event) {
+#ifdef Q_OS_ANDROID
+    if (obj == m_pCentralWidget && event->type() == QEvent::Resize &&
+            m_pRemoteLibraryButton) {
+        m_pRemoteLibraryButton->move(
+                qMax(8,
+                        m_pCentralWidget->width() -
+                                m_pRemoteLibraryButton->width() - 12),
+                12);
+        m_pRemoteLibraryButton->raise();
+    }
+#endif
     if (event->type() == QEvent::ToolTip) {
         // Always show tooltips if Ctrl is held down
         if (QApplication::keyboardModifiers().testFlag(Qt::ControlModifier)) {
