@@ -383,22 +383,37 @@ tracks();
             return;
         }
 
-        const QString location = sql.value(0).toString();
+        // Load the existing library track by its database id. Reconstructing a
+        // TrackRef from the stored path is unreliable on Android shared/removable
+        // storage because canonical-path resolution can fail even though Mixxx
+        // already has a valid library track for the file.
+        auto pTrackCollectionManager = m_pCoreServices->getTrackCollectionManager();
         auto pPlayerManager = m_pCoreServices->getPlayerManager();
-        if (!pPlayerManager || location.isEmpty()) {
+        const TrackPointer pTrack = pTrackCollectionManager
+                ? pTrackCollectionManager->getTrackById(TrackId(id))
+                : TrackPointer();
+        if (!pPlayerManager || !pTrack) {
             sendJson(pSocket,
                     QJsonDocument(QJsonObject{
                             {QStringLiteral("ok"), false},
                             {QStringLiteral("error"),
-                                    QStringLiteral("Player unavailable")}}),
+                                    QStringLiteral("Track or player unavailable")}}),
                     QByteArrayLiteral("503 Service Unavailable"));
             return;
         }
 
-        pPlayerManager->slotLoadLocationToPlayer(
-                location,
+#ifdef __STEM__
+        pPlayerManager->slotLoadTrackToPlayer(
+                pTrack,
+                PlayerManager::groupForDeck(deck - 1),
+                mixxx::StemChannelSelection(),
+                false);
+#else
+        pPlayerManager->slotLoadTrackToPlayer(
+                pTrack,
                 PlayerManager::groupForDeck(deck - 1),
                 false);
+#endif
         sendJson(pSocket,
                 QJsonDocument(QJsonObject{
                         {QStringLiteral("ok"), true},
