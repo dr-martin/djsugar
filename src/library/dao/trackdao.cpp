@@ -1491,7 +1491,13 @@ TrackPointer TrackDAO::getTrackById(TrackId trackId) const {
     { // Locking scope of cacheResolver
         // Location is the first column.
         DEBUG_ASSERT(queryRecord.count() > 0);
-        const auto trackLocation = queryRecord.value(0).toString();
+        const auto trackLocation = queryRecord.value(0).toString().trimmed();
+        if (trackLocation.isEmpty()) {
+            kLogger.warning()
+                    << "Refusing to construct track with empty file location for id"
+                    << trackId;
+            return nullptr;
+        }
         const auto fileInfo = mixxx::FileInfo(trackLocation);
         const auto fileAccess = mixxx::FileAccess(fileInfo);
         // Look up the track. First by trackId again, then find duplicates using the
