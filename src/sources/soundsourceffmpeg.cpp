@@ -338,7 +338,10 @@ QString SoundSourceFFmpeg::prepareAndroidPrivateCopy(const QString& sourcePath) 
     // Do not depend on QFileInfo::size()/mtime for the cache key on Android:
     // under scoped storage those values may be unavailable even though
     // ContentResolver can read the media item.
-    const QByteArray cacheKey = QDir::cleanPath(sourcePath).toUtf8();
+    const QByteArray cacheKey =
+            (QStringLiteral("android-media-v2|") +
+                    QDir::cleanPath(sourcePath))
+                    .toUtf8();
     const QString digest = QString::fromLatin1(
             QCryptographicHash::hash(cacheKey, QCryptographicHash::Sha256)
                     .toHex()
