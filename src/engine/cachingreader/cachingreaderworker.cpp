@@ -202,6 +202,15 @@ void CachingReaderWorker::loadTrack(const TrackPointer& pTrack) {
     closeAudioSource();
 
     if (!pTrack->getFileInfo().checkFileExists()) {
+#ifdef Q_OS_ANDROID
+        // QFileInfo can report a false negative for media that is readable
+        // through Android MediaStore under scoped storage. Let SoundSourceProxy
+        // attempt the Android decoder/cache fallback before declaring it missing.
+        kLogger.warning()
+                << m_group
+                << "Native file existence check failed on Android; trying decoder fallback for"
+                << pTrack->getFileInfo();
+#else
         kLogger.warning()
                 << m_group
                 << "File not found"
@@ -212,6 +221,7 @@ void CachingReaderWorker::loadTrack(const TrackPointer& pTrack) {
                 tr("The file '%1' could not be found.")
                         .arg(QDir::toNativeSeparators(pTrack->getLocation())));
         return;
+#endif
     }
 
     mixxx::AudioSource::OpenParams config;
