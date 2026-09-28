@@ -328,8 +328,9 @@ tracks();
                 "library.title COLLATE NOCASE LIMIT 600");
         sql.prepare(statement);
         if (!search.isEmpty()) {
-            sql.bindValue(QStringLiteral(":q"),
-                    QStringLiteral("%") + search + QStringLiteral("%"));
+            const QString searchPattern =
+                    QStringLiteral("%") + search + QStringLiteral("%");
+            sql.bindValue(QStringLiteral(":q"), QVariant(searchPattern));
         }
 
         QJsonArray rows;
