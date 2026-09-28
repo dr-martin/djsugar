@@ -390,7 +390,7 @@ tracks();
         auto pTrackCollectionManager = m_pCoreServices->getTrackCollectionManager();
         auto pPlayerManager = m_pCoreServices->getPlayerManager();
         const TrackPointer pTrack = pTrackCollectionManager
-                ? pTrackCollectionManager->getTrackById(TrackId(id))
+                ? pTrackCollectionManager->getTrackById(TrackId(QVariant(id)))
                 : TrackPointer();
         if (!pPlayerManager || !pTrack) {
             sendJson(pSocket,
