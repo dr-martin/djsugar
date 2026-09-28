@@ -1,5 +1,13 @@
 #include "sources/soundsourceffmpeg.h"
 
+#ifdef Q_OS_ANDROID
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QStandardPaths>
+#endif
+
 extern "C" {
 
 #include <libavutil/avutil.h>
@@ -288,21 +296,140 @@ QString SoundSourceFFmpeg::formatErrorString(int errnum) {
     return QString::fromLocal8Bit(errbuf);
 }
 
+#ifdef Q_OS_ANDROID
+QString androidDecoderShadowPath(const QString& sourcePath) {
+    const QFileInfo sourceInfo(sourcePath);
+    if (!sourceInfo.exists() || !sourceInfo.isFile()) {
+        return {};
+    }
+
+    QString cacheRoot =
+            QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    if (cacheRoot.isEmpty()) {
+        cacheRoot =
+                QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    }
+    if (cacheRoot.isEmpty()) {
+        return {};
+    }
+
+    QDir cacheDir(cacheRoot);
+    if (!cacheDir.mkpath(QStringLiteral("decoder-shadow"))) {
+        return {};
+    }
+    cacheDir.cd(QStringLiteral("decoder-shadow"));
+
+    const QByteArray cacheKey =
+            (sourceInfo.absoluteFilePath() + QLatin1Char('|') +
+                    QString::number(sourceInfo.size()) + QLatin1Char('|') +
+                    QString::number(
+                            sourceInfo.lastModified().toMSecsSinceEpoch()))
+                    .toUtf8();
+    const QString digest = QString::fromLatin1(
+            QCryptographicHash::hash(cacheKey, QCryptographicHash::Sha256)
+                    .toHex()
+                    .left(32));
+    const QString suffix = sourceInfo.suffix().isEmpty()
+            ? QStringLiteral("audio")
+            : sourceInfo.suffix().toLower();
+    const QString shadowPath =
+            cacheDir.filePath(digest + QLatin1Char('.') + suffix);
+
+    const QFileInfo shadowInfo(shadowPath);
+    if (shadowInfo.exists() && shadowInfo.size() == sourceInfo.size()) {
+        return shadowPath;
+    }
+
+    QFile::remove(shadowPath);
+    QFile source(sourcePath);
+    if (!source.open(QIODevice::ReadOnly)) {
+        kLogger.warning() << "[Android] Qt could not read external audio file:"
+                          << sourcePath << source.errorString();
+        return {};
+    }
+
+    QFile shadow(shadowPath);
+    if (!shadow.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        kLogger.warning() << "[Android] Could not create decoder shadow file:"
+                          << shadowPath << shadow.errorString();
+        return {};
+    }
+
+    constexpr qint64 kCopyChunkBytes = 1024 * 1024;
+    while (!source.atEnd()) {
+        const QByteArray chunk = source.read(kCopyChunkBytes);
+        if (chunk.isEmpty() && source.error() != QFileDevice::NoError) {
+            kLogger.warning() << "[Android] Reading external audio failed:"
+                              << sourcePath << source.errorString();
+            shadow.close();
+            QFile::remove(shadowPath);
+            return {};
+        }
+        if (shadow.write(chunk) != chunk.size()) {
+            kLogger.warning() << "[Android] Writing decoder shadow failed:"
+                              << shadowPath << shadow.errorString();
+            shadow.close();
+            QFile::remove(shadowPath);
+            return {};
+        }
+    }
+    shadow.close();
+
+    kLogger.info() << "[Android] Created private decoder shadow for"
+                   << sourcePath << "at" << shadowPath;
+    return shadowPath;
+}
+#endif
+
 // Static
 AVFormatContext* SoundSourceFFmpeg::openInputFile(
         const QString& fileName) {
     // Will be allocated implicitly when opening the input file
     AVFormatContext* pavInputFormatContext = nullptr;
 
-    // Open input file and allocate/initialize AVFormatContext
-    const int avformat_open_input_result =
+    // First try the original path. On recent Android releases the app may be
+    // able to enumerate and stat a shared-storage audio file while native
+    // FFmpeg still fails to open that path directly. This is especially common
+    // for /storage/emulated/0 and removable /storage/XXXX-XXXX volumes.
+    int avformatOpenInputResult =
             avformat_open_input(
-                    &pavInputFormatContext, fileName.toUtf8().constData(), nullptr, nullptr);
-    if (avformat_open_input_result != 0) {
-        DEBUG_ASSERT(avformat_open_input_result < 0);
+                    &pavInputFormatContext,
+                    fileName.toUtf8().constData(),
+                    nullptr,
+                    nullptr);
+
+#ifdef Q_OS_ANDROID
+    if (avformatOpenInputResult != 0) {
+        DEBUG_ASSERT(pavInputFormatContext == nullptr);
+        kLogger.warning().noquote()
+                << "[Android] FFmpeg direct open failed for"
+                << fileName << ":"
+                << formatErrorString(avformatOpenInputResult)
+                << "— retrying through app-private decoder cache";
+
+        const QString shadowPath = androidDecoderShadowPath(fileName);
+        if (!shadowPath.isEmpty()) {
+            avformatOpenInputResult =
+                    avformat_open_input(
+                            &pavInputFormatContext,
+                            shadowPath.toUtf8().constData(),
+                            nullptr,
+                            nullptr);
+            if (avformatOpenInputResult == 0) {
+                kLogger.info()
+                        << "[Android] FFmpeg opened private decoder shadow for"
+                        << fileName;
+            }
+        }
+    }
+#endif
+
+    if (avformatOpenInputResult != 0) {
+        DEBUG_ASSERT(avformatOpenInputResult < 0);
         kLogger.warning().noquote()
                 << "avformat_open_input() failed:"
-                << formatErrorString(avformat_open_input_result);
+                << formatErrorString(avformatOpenInputResult)
+                << "for" << fileName;
         DEBUG_ASSERT(pavInputFormatContext == nullptr);
     }
     return pavInputFormatContext;
