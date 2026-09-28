@@ -5,7 +5,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJniObject>
 #include <QStandardPaths>
+#include <QtJniTypes>
 #endif
 
 extern "C" {
@@ -297,11 +299,25 @@ QString SoundSourceFFmpeg::formatErrorString(int errnum) {
 }
 
 #ifdef Q_OS_ANDROID
+bool androidCopyAudioViaMediaStore(
+        const QString& sourcePath,
+        const QString& targetPath) {
+    const QJniObject jSource = QJniObject::fromString(sourcePath);
+    const QJniObject jTarget = QJniObject::fromString(targetPath);
+    const jboolean copied = QJniObject::callStaticMethod<jboolean>(
+            "org/mixxx/MainActivity",
+            "copyAudioViaMediaStore",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            jSource.object<jstring>(),
+            jTarget.object<jstring>());
+    return copied == JNI_TRUE;
+}
+
 QString androidDecoderShadowPath(const QString& sourcePath) {
-    const QFileInfo sourceInfo(sourcePath);
-    if (!sourceInfo.exists() || !sourceInfo.isFile()) {
+    if (sourcePath.isEmpty()) {
         return {};
     }
+    const QFileInfo sourceInfo(sourcePath);
 
     QString cacheRoot =
             QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
@@ -342,42 +358,58 @@ QString androidDecoderShadowPath(const QString& sourcePath) {
 
     QFile::remove(shadowPath);
     QFile source(sourcePath);
-    if (!source.open(QIODevice::ReadOnly)) {
-        kLogger.warning() << "[Android] Qt could not read external audio file:"
-                          << sourcePath << source.errorString();
-        return {};
-    }
-
-    QFile shadow(shadowPath);
-    if (!shadow.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        kLogger.warning() << "[Android] Could not create decoder shadow file:"
-                          << shadowPath << shadow.errorString();
-        return {};
-    }
-
-    constexpr qint64 kCopyChunkBytes = 1024 * 1024;
-    while (!source.atEnd()) {
-        const QByteArray chunk = source.read(kCopyChunkBytes);
-        if (chunk.isEmpty() && source.error() != QFileDevice::NoError) {
-            kLogger.warning() << "[Android] Reading external audio failed:"
-                              << sourcePath << source.errorString();
-            shadow.close();
-            QFile::remove(shadowPath);
-            return {};
-        }
-        if (shadow.write(chunk) != chunk.size()) {
-            kLogger.warning() << "[Android] Writing decoder shadow failed:"
+    if (source.open(QIODevice::ReadOnly)) {
+        QFile shadow(shadowPath);
+        if (!shadow.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            kLogger.warning() << "[Android] Could not create decoder shadow file:"
                               << shadowPath << shadow.errorString();
-            shadow.close();
-            QFile::remove(shadowPath);
             return {};
         }
-    }
-    shadow.close();
 
-    kLogger.info() << "[Android] Created private decoder shadow for"
-                   << sourcePath << "at" << shadowPath;
-    return shadowPath;
+        constexpr qint64 kCopyChunkBytes = 1024 * 1024;
+        while (!source.atEnd()) {
+            const QByteArray chunk = source.read(kCopyChunkBytes);
+            if (chunk.isEmpty() && source.error() != QFileDevice::NoError) {
+                kLogger.warning() << "[Android] Reading external audio failed:"
+                                  << sourcePath << source.errorString();
+                shadow.close();
+                QFile::remove(shadowPath);
+                return {};
+            }
+            if (shadow.write(chunk) != chunk.size()) {
+                kLogger.warning() << "[Android] Writing decoder shadow failed:"
+                                  << shadowPath << shadow.errorString();
+                shadow.close();
+                QFile::remove(shadowPath);
+                return {};
+            }
+        }
+        shadow.close();
+        kLogger.info() << "[Android] Created private decoder shadow with QFile for"
+                       << sourcePath << "at" << shadowPath;
+        return shadowPath;
+    }
+
+    // Scoped storage may allow MediaStore to read an audio item while native
+    // QFile/FFmpeg access to its /storage/... path is denied. Ask Android's
+    // ContentResolver to copy the same media item into our private cache.
+    kLogger.warning() << "[Android] QFile could not read audio path:"
+                      << sourcePath << source.errorString()
+                      << "— trying MediaStore";
+    if (androidCopyAudioViaMediaStore(sourcePath, shadowPath)) {
+        const QFileInfo copiedInfo(shadowPath);
+        if (copiedInfo.exists() && copiedInfo.isFile() &&
+                copiedInfo.size() > 0) {
+            kLogger.info() << "[Android] Created private decoder shadow through MediaStore for"
+                           << sourcePath << "at" << shadowPath;
+            return shadowPath;
+        }
+    }
+
+    QFile::remove(shadowPath);
+    kLogger.warning() << "[Android] MediaStore could not provide audio file:"
+                      << sourcePath;
+    return {};
 }
 #endif
 
