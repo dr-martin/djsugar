@@ -423,7 +423,6 @@ QString SoundSourceFFmpeg::prepareAndroidPrivateCopy(const QString& sourcePath) 
                       << sourcePath;
     return {};
 }
-}
 #endif
 
 // Static
@@ -432,40 +431,43 @@ AVFormatContext* SoundSourceFFmpeg::openInputFile(
     // Will be allocated implicitly when opening the input file
     AVFormatContext* pavInputFormatContext = nullptr;
 
-    // First try the original path. On recent Android releases the app may be
-    // able to enumerate and stat a shared-storage audio file while native
-    // FFmpeg still fails to open that path directly. This is especially common
-    // for /storage/emulated/0 and removable /storage/XXXX-XXXX volumes.
+    QString pathToOpen = fileName;
+#ifdef Q_OS_ANDROID
+    // Never hand shared/removable-storage paths directly to native FFmpeg.
+    // Resolve them to an app-private copy first so all subsequent reads/seeks
+    // use ordinary private filesystem access.
+    if (fileName.startsWith(QStringLiteral("/storage/")) ||
+            fileName.startsWith(QStringLiteral("/sdcard/"))) {
+        const QString shadowPath = prepareAndroidPrivateCopy(fileName);
+        if (!shadowPath.isEmpty()) {
+            pathToOpen = shadowPath;
+        }
+    }
+#endif
+
     int avformatOpenInputResult =
             avformat_open_input(
                     &pavInputFormatContext,
-                    fileName.toUtf8().constData(),
+                    pathToOpen.toUtf8().constData(),
                     nullptr,
                     nullptr);
 
 #ifdef Q_OS_ANDROID
-    if (avformatOpenInputResult != 0) {
+    // If creating a private copy failed, retain a direct-open fallback for
+    // devices where native path access is available.
+    if (avformatOpenInputResult != 0 && pathToOpen != fileName) {
         DEBUG_ASSERT(pavInputFormatContext == nullptr);
         kLogger.warning().noquote()
-                << "[Android] FFmpeg direct open failed for"
+                << "[Android] FFmpeg private-cache open failed for"
                 << fileName << ":"
                 << formatErrorString(avformatOpenInputResult)
-                << "— retrying through app-private decoder cache";
-
-        const QString shadowPath = prepareAndroidPrivateCopy(fileName);
-        if (!shadowPath.isEmpty()) {
-            avformatOpenInputResult =
-                    avformat_open_input(
-                            &pavInputFormatContext,
-                            shadowPath.toUtf8().constData(),
-                            nullptr,
-                            nullptr);
-            if (avformatOpenInputResult == 0) {
-                kLogger.info()
-                        << "[Android] FFmpeg opened private decoder shadow for"
-                        << fileName;
-            }
-        }
+                << "— trying original path";
+        avformatOpenInputResult =
+                avformat_open_input(
+                        &pavInputFormatContext,
+                        fileName.toUtf8().constData(),
+                        nullptr,
+                        nullptr);
     }
 #endif
 
