@@ -35,7 +35,8 @@ void LibraryTableModel::setTableModel() {
             " FROM library "
             "INNER JOIN track_locations "
             "ON library.location=track_locations.id "
-            "WHERE (mixxx_deleted=0 AND fs_deleted=0)");
+            "WHERE (mixxx_deleted=0 AND fs_deleted=0 "
+            "AND TRIM(COALESCE(track_locations.location, '')) <> '')");
     if (!query.exec()) {
         LOG_FAILED_QUERY(query);
     }
