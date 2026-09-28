@@ -317,7 +317,8 @@ tracks();
                 "FROM library "
                 "JOIN track_locations ON track_locations.id = library.location "
                 "WHERE library.mixxx_deleted = 0 "
-                "AND track_locations.fs_deleted = 0 ");
+                "AND track_locations.fs_deleted = 0 "
+                "AND TRIM(COALESCE(track_locations.location, '')) <> '' ");
         if (!search.isEmpty()) {
             statement += QStringLiteral(
                     "AND (library.title LIKE :q OR library.artist LIKE :q "
@@ -380,6 +381,17 @@ tracks();
                             {QStringLiteral("error"),
                                     QStringLiteral("Track not found")}}),
                     QByteArrayLiteral("404 Not Found"));
+            return;
+        }
+
+        const QString remoteTrackPath = sql.value(0).toString().trimmed();
+        if (remoteTrackPath.isEmpty()) {
+            sendJson(pSocket,
+                    QJsonDocument(QJsonObject{
+                            {QStringLiteral("ok"), false},
+                            {QStringLiteral("error"),
+                                    QStringLiteral("Track has no file path")}}),
+                    QByteArrayLiteral("409 Conflict"));
             return;
         }
 
