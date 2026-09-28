@@ -18,6 +18,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -200,6 +201,35 @@ public class MainActivity extends QtActivityBase {
 
     private static volatile MainActivity sInstance;
 
+    private boolean copyStreamToPrivateFile(InputStream in, File target) {
+        if (in == null) {
+            return false;
+        }
+        File parent = target.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            return false;
+        }
+        try (InputStream input = in;
+             OutputStream out = new FileOutputStream(target, false)) {
+            byte[] buffer = new byte[1024 * 1024];
+            long total = 0;
+            int count;
+            while ((count = input.read(buffer)) >= 0) {
+                if (count > 0) {
+                    out.write(buffer, 0, count);
+                    total += count;
+                }
+            }
+            out.flush();
+            return total > 0 && target.isFile() && target.length() > 0;
+        } catch (Exception e) {
+            if (target.exists()) {
+                target.delete();
+            }
+            return false;
+        }
+    }
+
     private boolean copyAudioViaMediaStoreImpl(String sourcePath, String targetPath) {
         ContentResolver resolver = getContentResolver();
 
@@ -231,12 +261,14 @@ public class MainActivity extends QtActivityBase {
             try {
                 for (String volumeName : MediaStore.getExternalVolumeNames(this)) {
                     collections.add(MediaStore.Audio.Media.getContentUri(volumeName));
+                    collections.add(MediaStore.Files.getContentUri(volumeName));
                 }
             } catch (Exception ignored) {
                 // Fall back to the traditional external collection below.
             }
         }
         collections.add(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI);
+        collections.add(MediaStore.Files.getContentUri("external"));
 
         Uri found = null;
         for (Uri collection : collections) {
@@ -312,36 +344,33 @@ public class MainActivity extends QtActivityBase {
             }
         }
 
-        if (found == null) {
-            return false;
-        }
-
         File target = new File(targetPath);
-        File parent = target.getParentFile();
-        if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            return false;
+
+        if (found != null) {
+            try {
+                if (copyStreamToPrivateFile(resolver.openInputStream(found), target)) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+                // Continue with direct Java file access below.
+            }
         }
 
-        try (InputStream in = resolver.openInputStream(found);
-             OutputStream out = new FileOutputStream(target, false)) {
-            if (in == null) {
-                return false;
+        // Last fallback: Java FileInputStream. This follows Android's app
+        // storage permission model and is independent from Qt's QFile/native
+        // decoder path handling.
+        try {
+            if (copyStreamToPrivateFile(new FileInputStream(sourcePath), target)) {
+                return true;
             }
-            byte[] buffer = new byte[1024 * 1024];
-            int count;
-            while ((count = in.read(buffer)) >= 0) {
-                if (count > 0) {
-                    out.write(buffer, 0, count);
-                }
-            }
-            out.flush();
-            return target.isFile() && target.length() > 0;
-        } catch (Exception e) {
-            if (target.exists()) {
-                target.delete();
-            }
-            return false;
+        } catch (Exception ignored) {
+            // Nothing else can resolve this path.
         }
+
+        if (target.exists()) {
+            target.delete();
+        }
+        return false;
     }
 
     // ─── Keyboard handling optimization ─────────────────────────────────
