@@ -46,6 +46,35 @@ void cleanUpDatabase(const QSqlDatabase& database) {
             << "Cleaning up database...";
     PerformanceTimer timer;
     timer.start();
+
+#ifdef Q_OS_ANDROID
+    // Old Android builds could leave stale library rows with an empty file
+    // location. They show up as duplicate-looking tracks and always fail with
+    // "The file \"\" could not be loaded." Hide only those invalid rows;
+    // valid tracks and their metadata remain untouched.
+    {
+        FwdSqlQuery invalidLocations(database,
+                QStringLiteral(
+                        "UPDATE track_locations "
+                        "SET fs_deleted=1, needs_verification=0 "
+                        "WHERE TRIM(COALESCE(location, ''))=''"));
+        if (!invalidLocations.execPrepared()) {
+            kLogger.warning()
+                    << "Failed to hide Android track locations with empty paths";
+        }
+
+        FwdSqlQuery invalidTracks(database,
+                QStringLiteral(
+                        "UPDATE library SET mixxx_deleted=1 "
+                        "WHERE location IN ("
+                        "SELECT id FROM track_locations "
+                        "WHERE TRIM(COALESCE(location, ''))='')"));
+        if (!invalidTracks.execPrepared()) {
+            kLogger.warning()
+                    << "Failed to hide Android library rows with empty paths";
+        }
+    }
+#endif
     // FIXME: The DELETE statement deletes more directory entries than necessary.
     // The subselect only covers directories that contain track files. Hashes
     // of parent directories that do not contain any track files will be deleted
