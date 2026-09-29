@@ -200,10 +200,10 @@ jobs:
             #     LILV=OFF                          LV2 plugins don't ship.
             #     VINYLCONTROL=OFF                  No turntable inputs.
             #     BENCHMARK=OFF / BUILD_TESTING=OFF Skip the test/bench builds.
-            #     MAD=OFF                           Use FFmpeg's MP3 decoder
-            #                                       instead of the standalone
-            #                                       libmad/id3tag combo to avoid
-            #                                       two near-duplicate decoders.
+            #     MAD=ON                            Use Mixxx's dedicated libmad
+            #                                       MP3 decoder. FFmpeg MP3 has
+            #                                       a known negative-seek/preroll
+            #                                       failure when MAD is absent.
             #
             #   Features kept ON for usability:
             #     QML, HID, BULK, NETWORKAUTH, FFMPEG, MODPLUG, WAVPACK, OPUS
@@ -264,7 +264,7 @@ jobs:
               -DBROADCAST=OFF
               -DLILV=OFF
               -DVINYLCONTROL=OFF
-              -DMAD=OFF
+              -DMAD=ON
               -DMODPLUG=OFF
               -DWAVPACK=OFF
               -DSTEM=OFF
