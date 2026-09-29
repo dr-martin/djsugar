@@ -6,6 +6,9 @@
 #include "analyzer/analyzersilence.h"
 #include "moc_cachingreaderworker.cpp"
 #include "sources/soundsourceproxy.h"
+#if defined(Q_OS_ANDROID) && defined(__FFMPEG__)
+#include "sources/soundsourceffmpeg.h"
+#endif
 #include "track/track.h"
 #include "util/compatibility/qmutex.h"
 #include "util/event.h"
@@ -229,7 +232,34 @@ void CachingReaderWorker::loadTrack(const TrackPointer& pTrack) {
 #ifdef __STEM__
     config.setStemMask(stemMask);
 #endif
+#if defined(Q_OS_ANDROID) && defined(__FFMPEG__)
+    const QString sourcePath = pTrack->getLocation().trimmed();
+    if (sourcePath.startsWith(QStringLiteral("/storage/")) ||
+            sourcePath.startsWith(QStringLiteral("/sdcard/"))) {
+        const QString privatePath =
+                mixxx::SoundSourceFFmpeg::prepareAndroidPrivateCopy(sourcePath);
+        if (!privatePath.isEmpty()) {
+            kLogger.info()
+                    << m_group
+                    << "Opening Android track through explicit private playback copy"
+                    << privatePath;
+            m_pAudioSource =
+                    SoundSourceProxy(
+                            pTrack,
+                            QUrl::fromLocalFile(privatePath))
+                            .openAudioSource(config);
+        } else {
+            kLogger.warning()
+                    << m_group
+                    << "Android private playback copy unavailable for"
+                    << sourcePath;
+        }
+    } else {
+        m_pAudioSource = SoundSourceProxy(pTrack).openAudioSource(config);
+    }
+#else
     m_pAudioSource = SoundSourceProxy(pTrack).openAudioSource(config);
+#endif
     if (!m_pAudioSource) {
         kLogger.warning()
                 << m_group
