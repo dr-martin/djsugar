@@ -1,13 +1,33 @@
 #include "mixxxmainwindow.h"
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QDebug>
+#include <QDir>
 #include <QFileDialog>
+#include <QFont>
+#include <QFontMetrics>
 #include <QKeyEvent>
 #include <QOpenGLContext>
+#include <QStandardPaths>
 #include <QStatusBar>
 #include <QUrl>
+
+#ifdef Q_OS_ANDROID
+#include <QHostAddress>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QMessageBox>
+#include <QNetworkInterface>
+#include <QPushButton>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QUrlQuery>
+#endif
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QGLFormat>
@@ -46,6 +66,7 @@
 #include "library/export/libraryexporter.h"
 #endif
 #include "library/library_prefs.h"
+#include "library/trackcollection.h"
 #include "library/trackcollectionmanager.h"
 #include "mixer/playerinfo.h"
 #include "mixer/playermanager.h"
@@ -94,6 +115,370 @@ inline bool supportsGlobalMenu() {
 
 const ConfigKey kHideMenuBarConfigKey = ConfigKey("[Config]", "hide_menubar");
 const ConfigKey kMenuBarHintConfigKey = ConfigKey("[Config]", "show_menubar_hint");
+
+#ifdef Q_OS_ANDROID
+class AndroidRemoteLibraryServer final : public QTcpServer {
+  public:
+    AndroidRemoteLibraryServer(
+            std::shared_ptr<mixxx::CoreServices> pCoreServices,
+            QObject* pParent)
+            : QTcpServer(pParent),
+              m_pCoreServices(std::move(pCoreServices)) {
+        connect(this,
+                &QTcpServer::newConnection,
+                this,
+                [this]() {
+                    while (hasPendingConnections()) {
+                        QTcpSocket* pSocket = nextPendingConnection();
+                        if (!pSocket) {
+                            continue;
+                        }
+                        connect(pSocket,
+                                &QTcpSocket::readyRead,
+                                pSocket,
+                                [this, pSocket]() {
+                                    handleSocket(pSocket);
+                                });
+                        connect(pSocket,
+                                &QTcpSocket::disconnected,
+                                pSocket,
+                                &QObject::deleteLater);
+                    }
+                });
+    }
+
+    bool start() {
+        for (quint16 port = 8090; port <= 8099; ++port) {
+            if (listen(QHostAddress::AnyIPv4, port)) {
+                m_port = port;
+                qInfo() << "[RemoteLibrary] listening on port" << m_port;
+                return true;
+            }
+        }
+        qWarning() << "[RemoteLibrary] could not bind ports 8090-8099:"
+                   << errorString();
+        return false;
+    }
+
+    QStringList urls() const {
+        QStringList result;
+        const QList<QHostAddress> addresses = QNetworkInterface::allAddresses();
+        for (const QHostAddress& address : addresses) {
+            if (address.protocol() != QAbstractSocket::IPv4Protocol ||
+                    address.isLoopback()) {
+                continue;
+            }
+            const QString ip = address.toString();
+            if (ip.startsWith(QStringLiteral("169.254."))) {
+                continue;
+            }
+            result.append(QStringLiteral("http://%1:%2")
+                                  .arg(ip)
+                                  .arg(m_port));
+        }
+        result.removeDuplicates();
+        return result;
+    }
+
+  private:
+    static QByteArray pageHtml() {
+        return QByteArrayLiteral(R"HTML(<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DJ Sugar Bibliotheek</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#eef1f4;color:#101214;margin:0}
+header{position:sticky;top:0;background:#fff;border-bottom:1px solid #bcc4cb;padding:12px;z-index:2}
+h1{font-size:24px;margin:0 0 10px}
+.controls{display:flex;gap:8px}
+input{font-size:20px;padding:12px;flex:1;min-width:0}
+button{font-size:18px;min-height:48px;padding:8px 14px;border:1px solid #7f8992;border-radius:7px;background:#fff}
+#status{padding:8px 12px;font-size:16px}
+.track{background:#fff;border-bottom:1px solid #d5dbe0;padding:12px}
+.title{font-size:22px;font-weight:700}
+.artist{font-size:18px;margin-top:3px;color:#343a40}
+.album{font-size:15px;margin-top:3px;color:#697078}
+.actions{display:flex;gap:10px;margin-top:10px}
+.actions button{flex:1;background:#d9ebfa;font-weight:700}
+</style>
+</head>
+<body>
+<header>
+<h1>DJ Sugar Bibliotheek</h1>
+<div class="controls">
+<input id="q" placeholder="Zoek titel of artiest">
+<button id="refresh">Vernieuw</button>
+</div>
+</header>
+<div id="status">Laden...</div>
+<div id="list"></div>
+<script>
+const q=document.getElementById('q');
+const list=document.getElementById('list');
+const status=document.getElementById('status');
+async function tracks(){
+  status.textContent='Laden...';
+  const r=await fetch('/api/tracks?q='+encodeURIComponent(q.value));
+  const data=await r.json();
+  list.innerHTML='';
+  status.textContent=data.length+' nummers';
+  for(const t of data){
+    const row=document.createElement('div');
+    row.className='track';
+    const title=document.createElement('div');
+    title.className='title';
+    title.textContent=t.title||'(zonder titel)';
+    const artist=document.createElement('div');
+    artist.className='artist';
+    artist.textContent=t.artist||'';
+    const album=document.createElement('div');
+    album.className='album';
+    album.textContent=t.album||'';
+    const actions=document.createElement('div');
+    actions.className='actions';
+    for(const deck of [1,2]){
+      const b=document.createElement('button');
+      b.textContent='LOAD '+deck;
+      b.onclick=async()=>{
+        b.disabled=true;
+        const rr=await fetch('/api/load?id='+t.id+'&deck='+deck);
+        const x=await rr.json();
+        status.textContent=x.ok
+          ? 'Geladen op Deck '+deck+': '+(t.artist? t.artist+' — ':'')+t.title
+          : 'Laden mislukt: '+(x.error||'onbekend');
+        b.disabled=false;
+      };
+      actions.appendChild(b);
+    }
+    row.append(title,artist,album,actions);
+    list.appendChild(row);
+  }
+}
+let timer;
+q.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(tracks,250)});
+q.addEventListener('keydown',e=>{if(e.key==='Enter')tracks()});
+document.getElementById('refresh').onclick=tracks;
+tracks();
+</script>
+</body>
+</html>)HTML");
+    }
+
+    void sendResponse(QTcpSocket* pSocket,
+            const QByteArray& status,
+            const QByteArray& contentType,
+            const QByteArray& body) {
+        QByteArray response = "HTTP/1.1 " + status + "\r\n";
+        response += "Content-Type: " + contentType + "\r\n";
+        response += "Content-Length: " + QByteArray::number(body.size()) + "\r\n";
+        response += "Cache-Control: no-store\r\n";
+        response += "Connection: close\r\n\r\n";
+        response += body;
+        pSocket->write(response);
+        pSocket->disconnectFromHost();
+    }
+
+    void sendJson(QTcpSocket* pSocket,
+            const QJsonDocument& document,
+            const QByteArray& status = QByteArrayLiteral("200 OK")) {
+        sendResponse(pSocket,
+                status,
+                QByteArrayLiteral("application/json; charset=utf-8"),
+                document.toJson(QJsonDocument::Compact));
+    }
+
+    QSqlDatabase database() const {
+        auto pLibrary = m_pCoreServices->getLibrary();
+        if (!pLibrary || !pLibrary->trackCollectionManager()) {
+            return {};
+        }
+        auto* pInternal =
+                pLibrary->trackCollectionManager()->internalCollection();
+        return pInternal ? pInternal->database() : QSqlDatabase();
+    }
+
+    void handleTracks(QTcpSocket* pSocket, const QUrlQuery& query) {
+        QSqlDatabase db = database();
+        if (!db.isValid() || !db.isOpen()) {
+            sendJson(pSocket,
+                    QJsonDocument(QJsonObject{
+                            {QStringLiteral("error"),
+                                    QStringLiteral("Library database unavailable")}}),
+                    QByteArrayLiteral("503 Service Unavailable"));
+            return;
+        }
+
+        const QString search = query.queryItemValue(QStringLiteral("q")).trimmed();
+        QSqlQuery sql(db);
+        QString statement = QStringLiteral(
+                "SELECT library.id, library.title, library.artist, library.album "
+                "FROM library "
+                "JOIN track_locations ON track_locations.id = library.location "
+                "WHERE library.mixxx_deleted = 0 "
+                "AND track_locations.fs_deleted = 0 "
+                "AND TRIM(COALESCE(track_locations.location, '')) <> '' ");
+        if (!search.isEmpty()) {
+            statement += QStringLiteral(
+                    "AND (library.title LIKE :q OR library.artist LIKE :q "
+                    "OR library.album LIKE :q) ");
+        }
+        statement += QStringLiteral(
+                "ORDER BY library.artist COLLATE NOCASE, "
+                "library.title COLLATE NOCASE LIMIT 600");
+        sql.prepare(statement);
+        if (!search.isEmpty()) {
+            const QString searchPattern =
+                    QStringLiteral("%") + search + QStringLiteral("%");
+            sql.bindValue(QStringLiteral(":q"), QVariant(searchPattern));
+        }
+
+        QJsonArray rows;
+        if (sql.exec()) {
+            while (sql.next()) {
+                QJsonObject row;
+                row.insert(QStringLiteral("id"), sql.value(0).toInt());
+                row.insert(QStringLiteral("title"), sql.value(1).toString());
+                row.insert(QStringLiteral("artist"), sql.value(2).toString());
+                row.insert(QStringLiteral("album"), sql.value(3).toString());
+                rows.append(row);
+            }
+        }
+        sendJson(pSocket, QJsonDocument(rows));
+    }
+
+    void handleLoad(QTcpSocket* pSocket, const QUrlQuery& query) {
+        bool idOk = false;
+        bool deckOk = false;
+        const int id =
+                query.queryItemValue(QStringLiteral("id")).toInt(&idOk);
+        const int deck =
+                query.queryItemValue(QStringLiteral("deck")).toInt(&deckOk);
+        if (!idOk || !deckOk || id <= 0 || deck < 1 || deck > 2) {
+            sendJson(pSocket,
+                    QJsonDocument(QJsonObject{
+                            {QStringLiteral("ok"), false},
+                            {QStringLiteral("error"),
+                                    QStringLiteral("Invalid id or deck")}}),
+                    QByteArrayLiteral("400 Bad Request"));
+            return;
+        }
+
+        QSqlDatabase db = database();
+        QSqlQuery sql(db);
+        sql.prepare(QStringLiteral(
+                "SELECT track_locations.location "
+                "FROM library "
+                "JOIN track_locations ON track_locations.id = library.location "
+                "WHERE library.id = :id AND library.mixxx_deleted = 0 "
+                "AND track_locations.fs_deleted = 0 LIMIT 1"));
+        sql.bindValue(QStringLiteral(":id"), id);
+        if (!sql.exec() || !sql.next()) {
+            sendJson(pSocket,
+                    QJsonDocument(QJsonObject{
+                            {QStringLiteral("ok"), false},
+                            {QStringLiteral("error"),
+                                    QStringLiteral("Track not found")}}),
+                    QByteArrayLiteral("404 Not Found"));
+            return;
+        }
+
+        const QString remoteTrackPath = sql.value(0).toString().trimmed();
+        if (remoteTrackPath.isEmpty()) {
+            sendJson(pSocket,
+                    QJsonDocument(QJsonObject{
+                            {QStringLiteral("ok"), false},
+                            {QStringLiteral("error"),
+                                    QStringLiteral("Track has no file path")}}),
+                    QByteArrayLiteral("409 Conflict"));
+            return;
+        }
+
+        // Load the existing library track by its database id. Reconstructing a
+        // TrackRef from the stored path is unreliable on Android shared/removable
+        // storage because canonical-path resolution can fail even though Mixxx
+        // already has a valid library track for the file.
+        auto pTrackCollectionManager = m_pCoreServices->getTrackCollectionManager();
+        auto pPlayerManager = m_pCoreServices->getPlayerManager();
+        const TrackPointer pTrack = pTrackCollectionManager
+                ? pTrackCollectionManager->getTrackById(TrackId(QVariant(id)))
+                : TrackPointer();
+        if (!pPlayerManager || !pTrack) {
+            sendJson(pSocket,
+                    QJsonDocument(QJsonObject{
+                            {QStringLiteral("ok"), false},
+                            {QStringLiteral("error"),
+                                    QStringLiteral("Track or player unavailable")}}),
+                    QByteArrayLiteral("503 Service Unavailable"));
+            return;
+        }
+
+#ifdef __STEM__
+        pPlayerManager->slotLoadTrackToPlayer(
+                pTrack,
+                PlayerManager::groupForDeck(deck - 1),
+                mixxx::StemChannelSelection(),
+                false);
+#else
+        pPlayerManager->slotLoadTrackToPlayer(
+                pTrack,
+                PlayerManager::groupForDeck(deck - 1),
+                false);
+#endif
+        sendJson(pSocket,
+                QJsonDocument(QJsonObject{
+                        {QStringLiteral("ok"), true},
+                        {QStringLiteral("deck"), deck}}));
+    }
+
+    void handleSocket(QTcpSocket* pSocket) {
+        QByteArray request = pSocket->property("remoteHttpBuffer").toByteArray();
+        request += pSocket->readAll();
+        if (!request.contains("\r\n\r\n")) {
+            pSocket->setProperty("remoteHttpBuffer", request);
+            return;
+        }
+
+        const int firstLineEnd = request.indexOf("\r\n");
+        const QByteArray firstLine =
+                firstLineEnd >= 0 ? request.left(firstLineEnd) : request;
+        const QList<QByteArray> parts = firstLine.split(' ');
+        if (parts.size() < 2 || parts.at(0) != QByteArrayLiteral("GET")) {
+            sendResponse(pSocket,
+                    QByteArrayLiteral("405 Method Not Allowed"),
+                    QByteArrayLiteral("text/plain; charset=utf-8"),
+                    QByteArrayLiteral("Only GET is supported"));
+            return;
+        }
+
+        const QUrl requestUrl = QUrl::fromEncoded(parts.at(1));
+        const QString path = requestUrl.path();
+        const QUrlQuery query(requestUrl);
+
+        if (path == QStringLiteral("/") ||
+                path == QStringLiteral("/index.html")) {
+            sendResponse(pSocket,
+                    QByteArrayLiteral("200 OK"),
+                    QByteArrayLiteral("text/html; charset=utf-8"),
+                    pageHtml());
+        } else if (path == QStringLiteral("/api/tracks")) {
+            handleTracks(pSocket, query);
+        } else if (path == QStringLiteral("/api/load")) {
+            handleLoad(pSocket, query);
+        } else {
+            sendResponse(pSocket,
+                    QByteArrayLiteral("404 Not Found"),
+                    QByteArrayLiteral("text/plain; charset=utf-8"),
+                    QByteArrayLiteral("Not found"));
+        }
+    }
+
+    std::shared_ptr<mixxx::CoreServices> m_pCoreServices;
+    quint16 m_port = 0;
+};
+#endif
+
 } // namespace
 
 MixxxMainWindow::MixxxMainWindow(std::shared_ptr<mixxx::CoreServices> pCoreServices)
@@ -205,6 +590,102 @@ void MixxxMainWindow::initialize() {
 
     UserSettingsPointer pConfig = m_pCoreServices->getSettings();
 
+#ifdef Q_OS_ANDROID
+    // DJ Sugar phone defaults: expose LateNight's built-in stacked deck
+    // waveforms so Deck 1 and Deck 2 can be beat-matched visually. Apply once,
+    // then leave the user's later choice alone.
+    const ConfigKey kAndroidVisualDefaults(
+            QStringLiteral("[DJ-Sugar-Android]"),
+            QStringLiteral("visual_defaults_v2"));
+    if (pConfig->getValueString(kAndroidVisualDefaults) != QStringLiteral("1")) {
+        pConfig->setValue(ConfigKey(QStringLiteral("[Skin]"),
+                                  QStringLiteral("show_waveforms")),
+                1);
+        // Give the two stacked waveforms roughly twice the old default height:
+        // ~110 px per deck instead of ~50 px, while retaining room for decks.
+        pConfig->setValue(ConfigKey(QStringLiteral("[Skin]"),
+                                  QStringLiteral("stackedWaveforms_splitSize")),
+                QStringLiteral("220,430"));
+        pConfig->setValue(kAndroidVisualDefaults, QStringLiteral("1"));
+    }
+#endif
+
+
+#ifdef Q_OS_ANDROID
+    // One comprehensive phone-readability default pass. The library has its
+    // own runtime font/row-height settings, so skin QSS alone cannot make the
+    // song list reliably larger. Apply and persist these defaults once.
+    const ConfigKey kAndroidReadabilityDefaults(
+            QStringLiteral("[DJ-Sugar-Android]"),
+            QStringLiteral("readability_defaults_v5"));
+    if (pConfig->getValueString(kAndroidReadabilityDefaults) != QStringLiteral("1")) {
+        QFont libraryFont = QApplication::font();
+        if (libraryFont.pointSizeF() > 0.0) {
+            libraryFont.setPointSizeF(
+                    qMax(19.0, libraryFont.pointSizeF() * 1.60));
+            libraryFont.setWeight(QFont::Medium);
+        } else {
+            const int currentPixels = libraryFont.pixelSize() > 0
+                    ? libraryFont.pixelSize()
+                    : 14;
+            libraryFont.setPixelSize(
+                    qMax(26, static_cast<int>(currentPixels * 1.60)));
+            libraryFont.setWeight(QFont::Medium);
+        }
+
+        const int libraryRowHeight =
+                qMax(52, QFontMetrics(libraryFont).height() + 14);
+        auto pLibrary = m_pCoreServices->getLibrary();
+        if (pLibrary) {
+            pLibrary->setFont(libraryFont);
+            pLibrary->setRowHeight(libraryRowHeight);
+        }
+
+        // Persist so every Library/YouTube/playlist table, including ones
+        // created later in the session, receives the same readable sizing.
+        pConfig->setValue(
+                ConfigKey(QStringLiteral("[Library]"), QStringLiteral("Font")),
+                libraryFont.toString());
+        pConfig->setValue(
+                ConfigKey(QStringLiteral("[Library]"), QStringLiteral("RowHeight")),
+                libraryRowHeight);
+        pConfig->setValue(kAndroidReadabilityDefaults, QStringLiteral("1"));
+    }
+#endif
+
+#ifdef Q_OS_ANDROID
+    // Make local-phone music usable without a first-run scavenger hunt through
+    // Preferences. Add only the normal Music and Download folders; do not scan
+    // all of /storage because large USB/SD volumes can hold tens of thousands
+    // of non-audio files. USB folders can still be added explicitly.
+    const ConfigKey kAndroidLocalDirs(
+            QStringLiteral("[DJ-Sugar-Android]"),
+            QStringLiteral("local_dirs_v1"));
+    if (pConfig->getValueString(kAndroidLocalDirs) != QStringLiteral("1")) {
+        const QStringList commonMusicDirs = {
+                QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
+                QStandardPaths::writableLocation(QStandardPaths::DownloadLocation),
+        };
+        auto pLibrary = m_pCoreServices->getLibrary();
+        bool storageIsReadable = false;
+        if (pLibrary) {
+            for (const QString& path : commonMusicDirs) {
+                if (path.isEmpty()) {
+                    continue;
+                }
+                const QFileInfo info(path);
+                if (!info.exists() || !info.isDir() || !info.isReadable()) {
+                    continue;
+                }
+                storageIsReadable = true;
+                pLibrary->requestAddDir(path, /*silent=*/true);
+            }
+        }
+        if (storageIsReadable) {
+            pConfig->setValue(kAndroidLocalDirs, QStringLiteral("1"));
+        }
+    }
+#endif
     // Set the visibility of tooltips, default "1" = ON
     m_toolTipsCfg = pConfig->getValue(
             ConfigKey("[Controls]", "Tooltips"),
@@ -430,6 +911,49 @@ void MixxxMainWindow::initialize() {
                 "QStatusBar { background-color: #000000; border: 0; } "
                 "QStatusBar::item { border: 0; }"));
     }
+
+#ifdef Q_OS_ANDROID
+    // Local-network remote library. A second phone, tablet or computer on the
+    // same Wi-Fi/hotspot can browse the phone's Mixxx library and load tracks
+    // onto Deck 1 or Deck 2 without needing its own copy of the music files.
+    auto* pRemoteLibraryServer =
+            new AndroidRemoteLibraryServer(m_pCoreServices, this);
+    m_pRemoteLibraryButton = new QPushButton(tr("REMOTE"), m_pCentralWidget);
+    m_pRemoteLibraryButton->setFixedSize(116, 42);
+    m_pRemoteLibraryButton->setStyleSheet(QStringLiteral(
+            "QPushButton { background:#1d2328; color:#ffffff; "
+            "border:2px solid #8a949d; border-radius:5px; padding:5px 12px; "
+            "font-size:17px; font-weight:700; } "
+            "QPushButton:pressed { background:#33414d; }"));
+    m_pRemoteLibraryButton->move(
+            qMax(8, m_pCentralWidget->width() - m_pRemoteLibraryButton->width() - 12),
+            12);
+    m_pRemoteLibraryButton->raise();
+    m_pRemoteLibraryButton->show();
+    m_pCentralWidget->installEventFilter(this);
+
+    if (pRemoteLibraryServer->start()) {
+        connect(m_pRemoteLibraryButton,
+                &QPushButton::clicked,
+                this,
+                [this, pRemoteLibraryServer]() {
+                    const QStringList urls = pRemoteLibraryServer->urls();
+                    const QString message = urls.isEmpty()
+                            ? tr("De remote bibliotheek draait, maar er is nog "
+                                 "geen lokaal IPv4-adres gevonden. Verbind beide "
+                                 "apparaten met dezelfde Wi-Fi of hotspot en "
+                                 "probeer opnieuw.")
+                            : tr("Open op je tweede telefoon of computer:\n\n%1")
+                                      .arg(urls.join(QLatin1Char('\n')));
+                    QMessageBox::information(
+                            this, tr("DJ Sugar Remote Bibliotheek"), message);
+                });
+    } else {
+        m_pRemoteLibraryButton->setEnabled(false);
+        m_pRemoteLibraryButton->setToolTip(
+                tr("Remote bibliotheek kon niet worden gestart."));
+    }
+#endif
 
 #ifndef __APPLE__
     // Ask for permission to auto-hide the menu bar if applicable.
@@ -1461,6 +1985,17 @@ void MixxxMainWindow::tryParseAndSetDefaultStyleSheet() {
 
 /// Catch ToolTip and WindowStateChange events
 bool MixxxMainWindow::eventFilter(QObject* obj, QEvent* event) {
+#ifdef Q_OS_ANDROID
+    if (obj == m_pCentralWidget && event->type() == QEvent::Resize &&
+            m_pRemoteLibraryButton) {
+        m_pRemoteLibraryButton->move(
+                qMax(8,
+                        m_pCentralWidget->width() -
+                                m_pRemoteLibraryButton->width() - 12),
+                12);
+        m_pRemoteLibraryButton->raise();
+    }
+#endif
     if (event->type() == QEvent::ToolTip) {
         // Always show tooltips if Ctrl is held down
         if (QApplication::keyboardModifiers().testFlag(Qt::ControlModifier)) {

@@ -13,12 +13,12 @@
         <Children>
 
           <WidgetGroup><!-- QuickEffect Meta knob + status dot -->
-            <Size>40f,34f</Size>
+            <Size>50f,44f</Size>
             <Children>
               <KnobComposed>
                 <TooltipId>QuickEffectRack_super1</TooltipId>
                 <Pos>0,0</Pos>
-                <Size>40f,34f</Size>
+                <Size>50f,44f</Size>
                 <Knob>skins:LateNight/<Variable name="KnobScheme"/>/knobs/knob_indicator_<Variable name="KnobIndicator"/>_<Variable name="KnobColorQuickEffect"/>.svg</Knob>
                 <BackPath>skins:LateNight/<Variable name="KnobScheme"/>/knobs/knob_bg_<Variable name="KnobBg"/>.svg</BackPath>
                 <MinAngle><Variable name="PotiMinAngle"/></MinAngle>
@@ -69,7 +69,7 @@
               <PushButton>
                 <TooltipId>QuickEffectRack_enabled</TooltipId>
                 <ObjectName>QuickEffectButton</ObjectName>
-                <Size>18f,18f</Size>
+                <Size>28f,28f</Size>
                 <NumberStates>2</NumberStates>
                 <State>
                   <Number>0</Number>

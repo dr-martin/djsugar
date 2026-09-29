@@ -1,5 +1,15 @@
 #include "sources/soundsourceffmpeg.h"
 
+#ifdef Q_OS_ANDROID
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJniObject>
+#include <QStandardPaths>
+#include <QtJniTypes>
+#endif
+
 extern "C" {
 
 #include <libavutil/avutil.h>
@@ -288,21 +298,216 @@ QString SoundSourceFFmpeg::formatErrorString(int errnum) {
     return QString::fromLocal8Bit(errbuf);
 }
 
+#ifdef Q_OS_ANDROID
+bool androidCopyAudioViaMediaStore(
+        const QString& sourcePath,
+        const QString& targetPath) {
+    const QJniObject jSource = QJniObject::fromString(sourcePath);
+    const QJniObject jTarget = QJniObject::fromString(targetPath);
+    const jboolean copied = QJniObject::callStaticMethod<jboolean>(
+            "org/mixxx/MainActivity",
+            "copyAudioViaMediaStore",
+            "(Ljava/lang/String;Ljava/lang/String;)Z",
+            jSource.object<jstring>(),
+            jTarget.object<jstring>());
+    return copied == JNI_TRUE;
+}
+
+QString SoundSourceFFmpeg::prepareAndroidPrivateCopy(const QString& sourcePath) {
+    if (sourcePath.isEmpty()) {
+        return {};
+    }
+
+    const QFileInfo sourceInfo(sourcePath);
+    QString cacheRoot =
+            QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    if (cacheRoot.isEmpty()) {
+        cacheRoot =
+                QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    }
+    if (cacheRoot.isEmpty()) {
+        return {};
+    }
+
+    QDir cacheDir(cacheRoot);
+    if (!cacheDir.mkpath(QStringLiteral("decoder-shadow"))) {
+        return {};
+    }
+    cacheDir.cd(QStringLiteral("decoder-shadow"));
+
+    // v3 deliberately invalidates older cache files. Earlier builds could
+    // accept a partially copied file merely because it was larger than 0 bytes.
+    const QByteArray cacheKey =
+            (QStringLiteral("android-media-v3|") +
+                    QDir::cleanPath(sourcePath))
+                    .toUtf8();
+    const QString digest = QString::fromLatin1(
+            QCryptographicHash::hash(cacheKey, QCryptographicHash::Sha256)
+                    .toHex()
+                    .left(32));
+    const QString suffix = sourceInfo.suffix().isEmpty()
+            ? QStringLiteral("audio")
+            : sourceInfo.suffix().toLower();
+    const QString shadowPath =
+            cacheDir.filePath(digest + QLatin1Char('.') + suffix);
+    const QString completeMarkerPath =
+            shadowPath + QStringLiteral(".complete");
+
+    const QFileInfo shadowInfo(shadowPath);
+    if (shadowInfo.exists() && shadowInfo.isFile() &&
+            shadowInfo.size() > 0 && QFileInfo::exists(completeMarkerPath)) {
+        return shadowPath;
+    }
+
+    QFile::remove(shadowPath);
+    QFile::remove(completeMarkerPath);
+
+    const auto markComplete = [&]() -> bool {
+        QFile marker(completeMarkerPath);
+        if (!marker.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            return false;
+        }
+        marker.write("ok");
+        marker.close();
+        return true;
+    };
+
+    // For shared/removable storage ask Android itself first. This is the most
+    // reliable route on scoped-storage devices and creates a private file that
+    // all native decoders can read normally.
+    if (sourcePath.startsWith(QStringLiteral("/storage/")) ||
+            sourcePath.startsWith(QStringLiteral("/sdcard/"))) {
+        if (androidCopyAudioViaMediaStore(sourcePath, shadowPath)) {
+            const QFileInfo copiedInfo(shadowPath);
+            if (copiedInfo.exists() && copiedInfo.isFile() &&
+                    copiedInfo.size() > 0 && markComplete()) {
+                kLogger.info()
+                        << "[Android] Created complete private decoder shadow through Android media access for"
+                        << sourcePath << "at" << shadowPath;
+                return shadowPath;
+            }
+        }
+        QFile::remove(shadowPath);
+        QFile::remove(completeMarkerPath);
+    }
+
+    // Fallback for devices where direct Qt file access genuinely works.
+    QFile source(sourcePath);
+    if (!source.open(QIODevice::ReadOnly)) {
+        kLogger.warning() << "[Android] QFile could not read audio path:"
+                          << sourcePath << source.errorString();
+        return {};
+    }
+
+    QFile shadow(shadowPath);
+    if (!shadow.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        kLogger.warning() << "[Android] Could not create decoder shadow file:"
+                          << shadowPath << shadow.errorString();
+        return {};
+    }
+
+    constexpr qint64 kCopyChunkBytes = 1024 * 1024;
+    qint64 copiedBytes = 0;
+    bool copyOk = true;
+    while (true) {
+        const QByteArray chunk = source.read(kCopyChunkBytes);
+        if (!chunk.isEmpty()) {
+            if (shadow.write(chunk) != chunk.size()) {
+                kLogger.warning() << "[Android] Writing decoder shadow failed:"
+                                  << shadowPath << shadow.errorString();
+                copyOk = false;
+                break;
+            }
+            copiedBytes += chunk.size();
+            continue;
+        }
+
+        if (source.error() != QFileDevice::NoError) {
+            kLogger.warning() << "[Android] Reading external audio failed:"
+                              << sourcePath << source.errorString();
+            copyOk = false;
+        } else if (!source.atEnd()) {
+            // Empty read before EOF is not a complete copy.
+            copyOk = false;
+        }
+        break;
+    }
+    shadow.close();
+
+    const QFileInfo copiedInfo(shadowPath);
+    const qint64 reportedSourceSize = sourceInfo.size();
+    if (reportedSourceSize > 0 && copiedBytes != reportedSourceSize) {
+        copyOk = false;
+    }
+
+    if (copyOk && copiedBytes > 0 &&
+            copiedInfo.exists() && copiedInfo.size() == copiedBytes &&
+            markComplete()) {
+        kLogger.info() << "[Android] Created complete private decoder shadow with QFile for"
+                       << sourcePath << "at" << shadowPath;
+        return shadowPath;
+    }
+
+    QFile::remove(shadowPath);
+    QFile::remove(completeMarkerPath);
+    kLogger.warning() << "[Android] Could not create a complete private copy for"
+                      << sourcePath;
+    return {};
+}
+#endif
+
 // Static
 AVFormatContext* SoundSourceFFmpeg::openInputFile(
         const QString& fileName) {
     // Will be allocated implicitly when opening the input file
     AVFormatContext* pavInputFormatContext = nullptr;
 
-    // Open input file and allocate/initialize AVFormatContext
-    const int avformat_open_input_result =
+    QString pathToOpen = fileName;
+#ifdef Q_OS_ANDROID
+    // Never hand shared/removable-storage paths directly to native FFmpeg.
+    // Resolve them to an app-private copy first so all subsequent reads/seeks
+    // use ordinary private filesystem access.
+    if (fileName.startsWith(QStringLiteral("/storage/")) ||
+            fileName.startsWith(QStringLiteral("/sdcard/"))) {
+        const QString shadowPath = prepareAndroidPrivateCopy(fileName);
+        if (!shadowPath.isEmpty()) {
+            pathToOpen = shadowPath;
+        }
+    }
+#endif
+
+    int avformatOpenInputResult =
             avformat_open_input(
-                    &pavInputFormatContext, fileName.toUtf8().constData(), nullptr, nullptr);
-    if (avformat_open_input_result != 0) {
-        DEBUG_ASSERT(avformat_open_input_result < 0);
+                    &pavInputFormatContext,
+                    pathToOpen.toUtf8().constData(),
+                    nullptr,
+                    nullptr);
+
+#ifdef Q_OS_ANDROID
+    // If creating a private copy failed, retain a direct-open fallback for
+    // devices where native path access is available.
+    if (avformatOpenInputResult != 0 && pathToOpen != fileName) {
+        DEBUG_ASSERT(pavInputFormatContext == nullptr);
+        kLogger.warning().noquote()
+                << "[Android] FFmpeg private-cache open failed for"
+                << fileName << ":"
+                << formatErrorString(avformatOpenInputResult)
+                << "— trying original path";
+        avformatOpenInputResult =
+                avformat_open_input(
+                        &pavInputFormatContext,
+                        fileName.toUtf8().constData(),
+                        nullptr,
+                        nullptr);
+    }
+#endif
+
+    if (avformatOpenInputResult != 0) {
+        DEBUG_ASSERT(avformatOpenInputResult < 0);
         kLogger.warning().noquote()
                 << "avformat_open_input() failed:"
-                << formatErrorString(avformat_open_input_result);
+                << formatErrorString(avformatOpenInputResult)
+                << "for" << fileName;
         DEBUG_ASSERT(pavInputFormatContext == nullptr);
     }
     return pavInputFormatContext;
@@ -471,10 +676,10 @@ QStringList SoundSourceProviderFFmpeg::getSupportedFileTypes() const {
 SoundSourceProviderPriority SoundSourceProviderFFmpeg::getPriorityHint(
         const QString& supportedFileType) const {
     Q_UNUSED(supportedFileType)
-    // TODO: Increase priority to Default or even Higher for all
-    // supported and tested file types?
-    // Currently it is only used as a fallback after all other
-    // SoundSources failed to open a file or are otherwise unavailable.
+    // Keep FFmpeg as the generic fallback after dedicated SoundSource
+    // implementations. This is especially important for MP3 on Android:
+    // Mixxx's FFmpeg MP3 path has a known negative-seek/preroll failure,
+    // while the dedicated MAD provider handles these files correctly.
     return SoundSourceProviderPriority::Lowest;
 }
 

@@ -57,15 +57,16 @@ WSuggestionsBar::WSuggestionsBar(
     setStyleSheet(QStringLiteral(
             "QFrame#SuggestionsBar { background-color: #000000; border-top: "
             "1px solid #1e1e1e; }"
-            "QLabel { color: #d2d2d2; }"
-            "QPushButton { background-color: #0a0a0a; color: #d2d2d2; border: "
-            "1px solid #1e1e1e; border-radius: 3px; padding: 2px 8px; }"
+            "QLabel { color: #f0f0f0; font-size: 20px; }"
+            "QPushButton { background-color: #0a0a0a; color: #f0f0f0; border: "
+            "1px solid #3a3a3a; border-radius: 3px; padding: 8px 12px; "
+            "font-size: 20px; }"
             "QPushButton:hover { background-color: #1e1e1e; }"
             "QPushButton[autodj=\"true\"] { border: 1px solid #d09300; }"));
 
     m_pLayout = new QHBoxLayout(this);
-    m_pLayout->setContentsMargins(6, 2, 6, 2);
-    m_pLayout->setSpacing(4);
+    m_pLayout->setContentsMargins(6, 6, 6, 6);
+    m_pLayout->setSpacing(5);
     m_pHeader = new QLabel(tr("UP NEXT"), this);
     QFont headerFont = m_pHeader->font();
     headerFont.setBold(true);

@@ -237,7 +237,7 @@
                   <PushButton>
                     <TooltipId>headSplit</TooltipId>
                     <ObjectName>SplitCue</ObjectName>
-                    <Size>48f,22f</Size>
+                    <Size>68f,36f</Size>
                     <NumberStates>2</NumberStates>
                     <RightClickIsPushButton>false</RightClickIsPushButton>
                     <State>

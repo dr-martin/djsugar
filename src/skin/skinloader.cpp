@@ -1,6 +1,7 @@
 #include "skin/skinloader.h"
 
 #include <QDir>
+#include <QFile>
 #include <QString>
 #include <QtDebug>
 
@@ -214,6 +215,25 @@ QWidget* SkinLoader::loadConfiguredSkin(QWidget* pParent,
     VERIFY_OR_DEBUG_ASSERT(pLoadedSkin != nullptr) {
         qCritical() << "No skin can be loaded, please check your installation.";
     }
+
+#if defined(Q_OS_ANDROID)
+    // DJ Sugar Android readability override. Keep this separate from the
+    // upstream skin so desktop builds and the original skin assets remain
+    // untouched. If a skin ships android-light.qss, append it last so it wins
+    // over the selected LateNight colour scheme.
+    const QString androidLightStylePath =
+            pSkin->path().absoluteFilePath() + QStringLiteral("/android-light.qss");
+    QFile androidLightStyleFile(androidLightStylePath);
+    if (androidLightStyleFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString androidLightStyle =
+                QString::fromUtf8(androidLightStyleFile.readAll());
+        pLoadedSkin->setStyleSheet(
+                pLoadedSkin->styleSheet() + QStringLiteral("\n") + androidLightStyle);
+        qInfo() << "Applied Android light readability style from"
+                << androidLightStylePath;
+    }
+#endif
+
     qInfo() << "Loaded skin" << pSkin->name() << "from" << pSkin->path().filePath();
     return pLoadedSkin;
 }

@@ -122,7 +122,7 @@
       <PushButton>
         <TooltipId>ai_bro_status</TooltipId>
         <ObjectName>AiBroButton</ObjectName>
-        <Size>50f,20f</Size>
+        <Size>66f,38f</Size>
         <NumberStates>2</NumberStates>
         <RightClickIsPushButton>false</RightClickIsPushButton>
         <State>
@@ -228,7 +228,7 @@
               <Label>
                 <ObjectName>LatencyLabel</ObjectName>
                 <TooltipId>audio_latency_usage</TooltipId>
-                <Size>0min,10f</Size>
+                <Size>0min,14f</Size>
                 <Alignment>center</Alignment>
                 <Text>Buffer %</Text>
               </Label>
@@ -245,7 +245,7 @@
         <Children>
           <Battery>
             <ObjectName>Battery</ObjectName>
-            <Size>24,24</Size>
+            <Size>32,32</Size>
             <SizePolicy>f,f</SizePolicy>
             <PixmapCharged scalemode="STRETCH_ASPECT">skins:LateNight/<Variable name="StyleScheme"/>/style/batt/ic_battery_charged.svg</PixmapCharged>
             <NumberStates>8</NumberStates>
@@ -260,7 +260,7 @@
       <WidgetGroup><!-- Recording button & recording duration label -->
         <ObjectName>RecBox</ObjectName>
         <Layout>stacked</Layout>
-        <Size>72f,20f</Size>
+        <Size>86f,38f</Size>
         <!-- minus 1px border
             = 70x18 available for text -->
         <Children>
@@ -274,11 +274,11 @@
 
           <WidgetGroup><!-- Rec dot + RecDuration -->
             <Layout>horizontal</Layout>
-            <Size>68f,20f</Size>
+            <Size>82f,38f</Size>
             <Children>
               <Label>
                 <ObjectName>RecDot</ObjectName>
-                <Size>15f,20f</Size>
+                <Size>18f,38f</Size>
                 <Connection>
                   <ConfigKey>[Recording],status</ConfigKey>
                   <BindProperty>highlight</BindProperty>
@@ -287,7 +287,7 @@
 
               <RecordingDuration>
                 <ObjectName>RecDuration</ObjectName>
-                <Size>53f,20f</Size>
+                <Size>65f,38f</Size>
                 <InactiveText>REC</InactiveText>
                 <Alignment>center</Alignment>
                 <Connection>
@@ -327,7 +327,7 @@
       </WidgetGroup>
 
       <PushButton>
-        <Size>80f,20f</Size>
+        <Size>96f,38f</Size>
         <TooltipId>skin_settings</TooltipId>
         <ObjectName>SkinSettingsToggle</ObjectName>
         <NumberStates>2</NumberStates>
@@ -348,7 +348,7 @@
 
       <Label>
         <ObjectName>ToolbarLogo</ObjectName>
-        <Size>74f,24f</Size>
+        <Size>90f,38f</Size>
       </Label>
 
       <WidgetGroup><Size>2f,min</Size></WidgetGroup>

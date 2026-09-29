@@ -64,6 +64,13 @@ class SoundSourceProxy {
 
     explicit SoundSourceProxy(TrackPointer pTrack);
 
+    // Play a Track through an explicitly resolved URL while keeping the
+    // original Track object for metadata/cues. Android uses this to decode an
+    // app-private copy instead of handing /storage/... to native decoders.
+    SoundSourceProxy(
+            TrackPointer pTrack,
+            const QUrl& playbackUrl);
+
     // Only needed for testing all available providers explicitly
     SoundSourceProxy(
             TrackPointer pTrack,

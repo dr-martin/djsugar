@@ -12,12 +12,12 @@
         <Children>
 
           <WidgetGroup><!-- EQ knob + Kill status dot -->
-            <Size>40f,34f</Size>
+            <Size>50f,44f</Size>
             <Children>
               <EffectParameterKnobComposed>
                 <TooltipId>filter<Variable name="EqRange"/></TooltipId>
                 <Pos>0,0</Pos>
-                <Size>40f,34f</Size>
+                <Size>50f,44f</Size>
                 <Knob>skins:LateNight/<Variable name="KnobScheme"/>/knobs/knob_indicator_regular_<Variable name="KnobColorEq"/>.svg</Knob>
                 <BackPath>skins:LateNight/<Variable name="KnobScheme"/>/knobs/knob_bg_regular.svg</BackPath>
                 <MinAngle><Variable name="PotiMinAngle"/></MinAngle>
@@ -63,7 +63,7 @@
           <WidgetGroup>
             <ObjectName>EQKillButtonBox</ObjectName>
             <Layout>vertical</Layout>
-            <Size>18f,34f</Size>
+            <Size>28f,44f</Size>
             <Children>
 
               <WidgetGroup><Size>0min,5f</Size></WidgetGroup>
@@ -71,7 +71,7 @@
               <EffectPushButton>
                 <TooltipId>filter<Variable name="EqRange"/>Kill</TooltipId>
                 <ObjectName>EQKillButton_<Variable name="EqRange"/></ObjectName>
-                <Size>18f,18f</Size>
+                <Size>28f,28f</Size>
                 <NumberStates>2</NumberStates>
                 <EffectUnitGroup><Variable name="EqFxUnit"/></EffectUnitGroup>
                 <Effect>1</Effect>

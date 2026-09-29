@@ -78,6 +78,12 @@ class YouTubeService : public QObject {
     /// initial result set is large enough for infinite scroll to work.
     void searchVideos(const QString& query, int cap = 25, int minResults = 0);
 
+    /// Import a public YouTube playlist or auto-generated Mix URL.
+    /// Results are returned through searchResultsReady() using the original
+    /// playlist URL as the query key, so the existing YouTube table can render
+    /// and load the tracks exactly like normal search results.
+    void fetchPlaylist(const QString& playlistUrl, int cap = 100);
+
     /// Fetch the next page of results for the most recent search() call.
     /// Uses the InnerTube continuation token stored from the last successful
     /// search response. Emits searchMoreReady(query, results) on success, or
@@ -292,8 +298,21 @@ class YouTubeService : public QObject {
 #if defined(Q_OS_ANDROID) && defined(HAVE_YTDLP_ANDROID)
     // ----- bundled youtubedl-android (Android only, no external deps) -----
 
+    /// Run search through the bundled, self-updating yt-dlp runtime.
+    /// Used when direct InnerTube search is blocked or changes response shape.
+    void searchViaAndroidBundled(const QString& query, int cap);
+
+    /// Import playlists / YouTube Mix URLs through bundled yt-dlp. On Android
+    /// this is more resilient than hand-parsing the frequently-changing
+    /// InnerTube playlist response.
+    void fetchPlaylistViaAndroidBundled(const QString& source, int cap);
+
+    /// Shared flat-metadata request used by Android search and playlist import.
+    void fetchFlatViaAndroidBundled(
+            const QString& source, const QString& emittedQuery, int cap);
+
     /// Download using the bundled youtubedl-android runtime via JNI.
-    /// This is the primary fallback on Android when Piped fails.
+    /// This is the primary downloader on Android.
     /// No external Python, Termux, or system dependency needed.
     void downloadViaAndroidBundled(const QString& videoId, const QString& cacheDir);
 #endif

@@ -1,8 +1,14 @@
 #pragma once
 
+#include <QJniObject>
+
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <vector>
 
 struct libusb_context;
+class AndroidMidiController;
 
 namespace mixxx {
 namespace android {
@@ -10,6 +16,11 @@ namespace android {
 const QJniObject& getIntent();
 bool waitForPermission(const QJniObject& device);
 void usbDeviceAccessResult(QJniObject device, bool granted);
+
+// Register Android MIDI controllers so Java MidiReceiver callbacks can be
+// routed back to the correct native controller instance.
+int registerMidiController(AndroidMidiController* controller);
+void unregisterMidiController(int controllerId);
 
 extern std::mutex s_androidLock;
 extern std::condition_variable s_grantingWaitCond;

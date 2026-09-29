@@ -15,6 +15,7 @@ class DlgPreferences;
 class DlgKeywheel;
 class GuiTick;
 class LaunchImage;
+class QPushButton;
 class VisualsManager;
 class WMainMenuBar;
 class WSuggestionsBar;
@@ -148,6 +149,10 @@ class MixxxMainWindow : public QMainWindow {
     // "Up Next" status-bar suggestion strip; created lazily after the skin
     // is first loaded. Owned by the QStatusBar (parented_ptr is overkill).
     WSuggestionsBar* m_pSuggestionsBar = nullptr;
+#ifdef Q_OS_ANDROID
+    // Floating remote-library button kept inside the visible central widget.
+    QPushButton* m_pRemoteLibraryButton = nullptr;
+#endif
 #ifndef __APPLE__
     Qt::WindowStates m_prevState;
 #endif
