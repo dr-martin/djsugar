@@ -454,7 +454,6 @@ QString SoundSourceFFmpeg::prepareAndroidPrivateCopy(const QString& sourcePath) 
                       << sourcePath;
     return {};
 }
-}
 #endif
 
 // Static
