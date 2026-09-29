@@ -1380,6 +1380,20 @@ TrackPointer TrackDAO::getTrackById(TrackId trackId) const {
 
     // The GlobalTrackCache is only locked while executing the following line.
     TrackPointer pTrack = GlobalTrackCacheLocker().lookupTrackById(trackId);
+#ifdef Q_OS_ANDROID
+    // Old Android scans could leave a cached Track object with a valid id but
+    // no usable file location. Returning that object here bypasses the database
+    // lookup below and results in the persistent error:
+    // "The file \"\" could not be loaded." Drop only those broken cached
+    // objects so this call can reconstruct the track from track_locations.
+    if (pTrack && pTrack->getLocation().trimmed().isEmpty()) {
+        kLogger.warning()
+                << "Dropping Android cached track with empty location for id"
+                << trackId;
+        GlobalTrackCacheLocker().purgeTrackId(trackId);
+        pTrack.reset();
+    }
+#endif
     if (pTrack) {
         return pTrack;
     }
