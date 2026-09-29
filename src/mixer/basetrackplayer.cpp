@@ -16,6 +16,9 @@
 #include "mixer/playerinfo.h"
 #include "mixer/playermanager.h"
 #include "moc_basetrackplayer.cpp"
+#if defined(Q_OS_ANDROID) && defined(__FFMPEG__)
+#include "sources/soundsourceffmpeg.h"
+#endif
 #include "track/track.h"
 #include "util/sandbox.h"
 #include "vinylcontrol/defs_vinylcontrol.h"
@@ -622,6 +625,32 @@ void BaseTrackPlayerImpl::slotLoadTrack(TrackPointer pNewTrack,
         bool bPlay) {
 #endif
     //qDebug() << "BaseTrackPlayerImpl::slotLoadTrack" << getGroup() << pNewTrack.get();
+
+#if defined(Q_OS_ANDROID) && defined(__FFMPEG__)
+    // Resolve Android shared-storage audio on the GUI/main thread before the
+    // engine worker sees it. QJni/ContentResolver access is much more reliable
+    // here than from the decoder worker thread. Once created, the engine reuses
+    // this completed app-private shadow file.
+    if (pNewTrack) {
+        const QString sourcePath = pNewTrack->getLocation().trimmed();
+        if (sourcePath.startsWith(QStringLiteral("/storage/")) ||
+                sourcePath.startsWith(QStringLiteral("/sdcard/"))) {
+            const QString privatePath =
+                    mixxx::SoundSourceFFmpeg::prepareAndroidPrivateCopy(sourcePath);
+            if (privatePath.isEmpty()) {
+                QMessageBox::warning(
+                        nullptr,
+                        tr("Couldn't load track."),
+                        tr("Android could not make a readable local copy of:\n%1")
+                                .arg(QDir::toNativeSeparators(sourcePath)));
+                return;
+            }
+            qInfo() << "[Android] Prepared playback copy before engine load:"
+                    << sourcePath << "->" << privatePath;
+        }
+    }
+#endif
+
     // Before loading the track, ensure we have access. This uses lazy
     // evaluation to make sure track isn't NULL before we dereference it.
     if (pNewTrack) {
