@@ -1,6 +1,7 @@
 #include "engine/cachingreader/cachingreaderworker.h"
 
 #include <QAtomicInt>
+#include <QUrl>
 #include <QtDebug>
 
 #include "analyzer/analyzersilence.h"
