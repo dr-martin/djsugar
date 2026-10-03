@@ -3142,6 +3142,40 @@ void YouTubeService::downloadViaAndroidBundled(
             return;
         }
 
+        // Audio extraction below uses yt-dlp's FFmpeg post-processor.
+        // youtubedl-android ships FFmpeg as a separate AAR/runtime and requires
+        // FFmpeg.getInstance().init(context) before any --extract-audio request.
+        // Search/metadata does not need FFmpeg, which is why YouTube result lists
+        // could work while every attempt to actually load audio failed.
+        QJniObject ffmpeg = QJniObject::callStaticObjectMethod(
+                "com/yausername/ffmpeg/FFmpeg",
+                "getInstance",
+                "()Lcom/yausername/ffmpeg/FFmpeg;");
+        if (!ffmpeg.isValid()) {
+            kLogger.warning() << "[Android] downloadViaAndroidBundled:"
+                              << "FFmpeg.getInstance() returned invalid for"
+                              << videoId;
+            if (guard) {
+                Q_EMIT guard->downloadFailed(
+                        videoId, "Bundled FFmpeg runtime is not available");
+            }
+            return;
+        }
+        ffmpeg.callMethod<void>(
+                "init",
+                "(Landroid/content/Context;)V",
+                context.object());
+        if (env.checkAndClearExceptions()) {
+            kLogger.warning() << "[Android] downloadViaAndroidBundled:"
+                              << "FFmpeg.init() threw exception for"
+                              << videoId;
+            if (guard) {
+                Q_EMIT guard->downloadFailed(
+                        videoId, "Bundled FFmpeg initialization failed");
+            }
+            return;
+        }
+
         // The yt-dlp packaged inside the AAR is whatever version was bundled at
         // the library's build time and goes stale quickly — YouTube regularly
         // breaks older extractors, which is the usual reason downloads stop
