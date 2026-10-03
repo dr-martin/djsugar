@@ -318,7 +318,17 @@ tracks();
                 "JOIN track_locations ON track_locations.id = library.location "
                 "WHERE library.mixxx_deleted = 0 "
                 "AND track_locations.fs_deleted = 0 "
-                "AND TRIM(COALESCE(track_locations.location, '')) <> '' ");
+                "AND TRIM(COALESCE(track_locations.location, '')) <> '' "
+                // Historical rescans can leave more than one active library
+                // row pointing at the same unique track_locations row. The
+                // browser must expose each physical file only once. Keep the
+                // oldest/original library row so existing metadata/cues are
+                // preferred over later duplicate rows.
+                "AND library.id = ("
+                "SELECT MIN(l2.id) FROM library l2 "
+                "WHERE l2.location = library.location "
+                "AND l2.mixxx_deleted = 0"
+                ") ");
         if (!search.isEmpty()) {
             statement += QStringLiteral(
                     "AND (library.title LIKE :q OR library.artist LIKE :q "
