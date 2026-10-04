@@ -1057,6 +1057,12 @@ tracks();
             handleTracks(pSocket, query);
         } else if (path == QStringLiteral("/api/load")) {
             handleLoad(pSocket, query);
+        } else if (path == QStringLiteral("/api/soundcloud/search")) {
+            handleSoundCloudSearch(pSocket, query);
+        } else if (path == QStringLiteral("/api/soundcloud/load")) {
+            handleSoundCloudLoad(pSocket, query);
+        } else if (path == QStringLiteral("/api/soundcloud/status")) {
+            handleSoundCloudStatus(pSocket, query);
         } else {
             sendResponse(pSocket,
                     QByteArrayLiteral("404 Not Found"),
@@ -1066,6 +1072,9 @@ tracks();
     }
 
     std::shared_ptr<mixxx::CoreServices> m_pCoreServices;
+    QHash<int, DeckPlaybackState> m_deckPlayback;
+    QSet<int> m_playedTrackIds;
+    QHash<QString, SoundCloudJob> m_soundCloudJobs;
     quint16 m_port = 0;
 };
 #endif
