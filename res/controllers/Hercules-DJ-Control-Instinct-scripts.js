@@ -90,8 +90,10 @@ HCInstinct.wheelTouch1 = function (channel, control, value, status) {
 
 HCInstinct.wheelTurn0 = function (channel, control, value, status) {
 
-    // See if we're on scratching.
-    //if (HCInstinct.scratching[0] == false )  return;
+    // Vinyl behaviour: only move the virtual record while the jog surface is
+    // actually held. With no incoming ticks the record stays still; positive
+    // ticks move forward and negative ticks move backward.
+    if (HCInstinct.scratching[0] == false )  return;
 
     var newValue;
     if (value-64 > 0) newValue = value-128; // 7F, 7E, 7D
@@ -101,7 +103,7 @@ HCInstinct.wheelTurn0 = function (channel, control, value, status) {
 
 HCInstinct.wheelTurn1 = function (channel, control, value, status) {
 
-    // See if we're on scratching.
+    // Same vinyl behaviour on the right deck.
     if (HCInstinct.scratching[1] == false )  return;
 
     var newValue;
