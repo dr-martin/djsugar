@@ -38,6 +38,14 @@ struct YouTubeVideoInfo {
     bool isLive = false;
 };
 
+struct SoundCloudTrackInfo {
+    QString id;
+    QString title;
+    QString uploader;
+    QString url;
+    int durationSec = 0;
+};
+
 /// YouTube extractor + downloader.
 ///
 /// Uses three cooperating backends so the YouTube tab works out of the box
@@ -124,6 +132,21 @@ class YouTubeService : public QObject {
     /// or downloadFailed(videoId, error).
     void downloadVideo(const QString& videoId, const QString& cacheDir);
 
+    /// Search public SoundCloud tracks through yt-dlp. This intentionally uses
+    /// the same bundled/self-updating runtime as YouTube so Android needs no
+    /// separate SoundCloud SDK or account.
+    void searchSoundCloud(const QString& query, int cap = 25);
+
+    /// Download one SoundCloud search result into cacheDir and convert it to
+    /// M4A so it follows the same decoder path as cached YouTube audio.
+    /// requestKey is an opaque caller-supplied identifier used to correlate
+    /// asynchronous completion with a remote-browser request.
+    void downloadSoundCloud(const QString& sourceUrl,
+            const QString& requestKey,
+            const QString& cacheDir,
+            const QString& title = QString(),
+            const QString& uploader = QString());
+
     /// Fetch SponsorBlock segments for the given videoId from the public
     /// SponsorBlock API at sponsor.ajay.app.
     void fetchSponsorSegments(const QString& videoId);
@@ -146,6 +169,17 @@ class YouTubeService : public QObject {
     void searchFailed(const QString& query, const QString& error);
     void downloadFinished(const QString& videoId, const QString& localPath);
     void downloadFailed(const QString& videoId, const QString& error);
+    void soundCloudSearchResultsReady(
+            const QString& query,
+            const QList<mixxx::SoundCloudTrackInfo>& results);
+    void soundCloudSearchFailed(const QString& query, const QString& error);
+    void soundCloudDownloadFinished(const QString& requestKey,
+            const QString& localPath,
+            const QString& title,
+            const QString& uploader,
+            const QString& sourceUrl);
+    void soundCloudDownloadFailed(
+            const QString& requestKey, const QString& error);
     void sponsorSegmentsFetched(
             const QString& videoId, const QList<mixxx::SponsorSegment>& segments);
     /// Emitted when YouTube returns a response indicating automated access
@@ -278,6 +312,12 @@ class YouTubeService : public QObject {
 
     void searchViaYtDlp(const QString& query, int cap);
     void downloadViaYtDlp(const QString& videoId, const QString& cacheDir);
+    void searchSoundCloudViaYtDlp(const QString& query, int cap);
+    void downloadSoundCloudViaYtDlp(const QString& sourceUrl,
+            const QString& requestKey,
+            const QString& cacheDir,
+            const QString& title,
+            const QString& uploader);
 
     /// Auto-fetch continuation pages after an initial InnerTube search returns
     /// fewer than `minResults` results. Accumulates results across pages and
@@ -315,6 +355,12 @@ class YouTubeService : public QObject {
     /// This is the primary downloader on Android.
     /// No external Python, Termux, or system dependency needed.
     void downloadViaAndroidBundled(const QString& videoId, const QString& cacheDir);
+    void searchSoundCloudViaAndroidBundled(const QString& query, int cap);
+    void downloadSoundCloudViaAndroidBundled(const QString& sourceUrl,
+            const QString& requestKey,
+            const QString& cacheDir,
+            const QString& title,
+            const QString& uploader);
 #endif
 
     // ----- shared -----
