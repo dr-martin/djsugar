@@ -200,74 +200,183 @@ class AndroidRemoteLibraryServer final : public QTcpServer {
 body{font-family:system-ui,sans-serif;background:#eef1f4;color:#101214;margin:0}
 header{position:sticky;top:0;background:#fff;border-bottom:1px solid #bcc4cb;padding:12px;z-index:2}
 h1{font-size:24px;margin:0 0 10px}
-.controls{display:flex;gap:8px}
-input{font-size:20px;padding:12px;flex:1;min-width:0}
+.controls{display:flex;gap:8px;margin-top:8px}
+input{font-size:19px;padding:11px;flex:1;min-width:0;border:1px solid #9aa3ab;border-radius:7px}
 button{font-size:18px;min-height:48px;padding:8px 14px;border:1px solid #7f8992;border-radius:7px;background:#fff}
-#status{padding:8px 12px;font-size:16px}
+#status{padding:9px 12px;font-size:16px;position:sticky;top:139px;background:#eef1f4;z-index:1}
+.section{padding:5px 12px;font-size:16px;font-weight:700;color:#495057}
 .track{background:#fff;border-bottom:1px solid #d5dbe0;padding:12px}
-.title{font-size:22px;font-weight:700}
+.title{font-size:21px;font-weight:700}
 .artist{font-size:18px;margin-top:3px;color:#343a40}
 .album{font-size:15px;margin-top:3px;color:#697078}
+.meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}
+.badge{font-size:13px;padding:3px 7px;border-radius:12px;background:#e9ecef}
+.played{background:#d8f3dc;font-weight:700}
+.online{background:#fff3bf}
 .actions{display:flex;gap:10px;margin-top:10px}
 .actions button{flex:1;background:#d9ebfa;font-weight:700}
+#scresults:empty{display:none}
 </style>
 </head>
 <body>
 <header>
 <h1>DJ Sugar Bibliotheek</h1>
 <div class="controls">
-<input id="q" placeholder="Zoek titel of artiest">
+<input id="q" placeholder="Zoek in mijn muziek">
 <button id="refresh">Vernieuw</button>
+</div>
+<div class="controls">
+<input id="scq" placeholder="Zoek op SoundCloud">
+<button id="scsearch">Zoek</button>
 </div>
 </header>
 <div id="status">Laden...</div>
+<div id="scresults"></div>
 <div id="list"></div>
 <script>
 const q=document.getElementById('q');
+const scq=document.getElementById('scq');
 const list=document.getElementById('list');
+const scresults=document.getElementById('scresults');
 const status=document.getElementById('status');
+
+function addMeta(row,t,online=false){
+  const meta=document.createElement('div');
+  meta.className='meta';
+  const source=document.createElement('span');
+  source.className='badge'+(online?' online':'');
+  source.textContent=t.source||'Lokaal';
+  meta.appendChild(source);
+  if(t.played){
+    const p=document.createElement('span');
+    p.className='badge played';
+    p.textContent='GEDRAAID ✓';
+    meta.appendChild(p);
+  }
+  row.appendChild(meta);
+}
+function baseRow(t,online=false){
+  const row=document.createElement('div');
+  row.className='track';
+  const title=document.createElement('div');
+  title.className='title';
+  title.textContent=t.title||'(zonder titel)';
+  const artist=document.createElement('div');
+  artist.className='artist';
+  artist.textContent=t.artist||'';
+  const album=document.createElement('div');
+  album.className='album';
+  album.textContent=t.album||'';
+  row.append(title,artist,album);
+  addMeta(row,t,online);
+  return row;
+}
 async function tracks(){
   status.textContent='Laden...';
   const r=await fetch('/api/tracks?q='+encodeURIComponent(q.value));
   const data=await r.json();
   list.innerHTML='';
+  if(!Array.isArray(data)){
+    status.textContent='Bibliotheek laden mislukt';
+    return;
+  }
   status.textContent=data.length+' nummers';
   for(const t of data){
-    const row=document.createElement('div');
-    row.className='track';
-    const title=document.createElement('div');
-    title.className='title';
-    title.textContent=t.title||'(zonder titel)';
-    const artist=document.createElement('div');
-    artist.className='artist';
-    artist.textContent=t.artist||'';
-    const album=document.createElement('div');
-    album.className='album';
-    album.textContent=t.album||'';
+    const row=baseRow(t,false);
     const actions=document.createElement('div');
     actions.className='actions';
-    for(const deck of [1,2]){
-      const b=document.createElement('button');
-      b.textContent='LOAD '+deck;
-      b.onclick=async()=>{
-        b.disabled=true;
-        const rr=await fetch('/api/load?id='+t.id+'&deck='+deck);
-        const x=await rr.json();
-        status.textContent=x.ok
-          ? 'Geladen op Deck '+deck+': '+(t.artist? t.artist+' — ':'')+t.title
-          : 'Laden mislukt: '+(x.error||'onbekend');
-        b.disabled=false;
-      };
-      actions.appendChild(b);
-    }
-    row.append(title,artist,album,actions);
+    const b=document.createElement('button');
+    b.textContent='LOAD';
+    b.onclick=async()=>{
+      b.disabled=true;
+      const rr=await fetch('/api/load?id='+encodeURIComponent(t.id));
+      const x=await rr.json();
+      status.textContent=x.ok
+        ? 'Geladen op Deck '+x.deck+': '+(t.artist?t.artist+' — ':'')+t.title
+        : 'Laden geweigerd: '+(x.error||'onbekend');
+      b.disabled=false;
+    };
+    actions.appendChild(b);
+    row.appendChild(actions);
     list.appendChild(row);
   }
+}
+async function searchSoundCloud(){
+  const term=scq.value.trim();
+  if(!term)return;
+  status.textContent='SoundCloud zoeken...';
+  document.getElementById('scsearch').disabled=true;
+  try{
+    const r=await fetch('/api/soundcloud/search?q='+encodeURIComponent(term));
+    const data=await r.json();
+    scresults.innerHTML='';
+    if(!Array.isArray(data)){
+      status.textContent='SoundCloud zoeken mislukt: '+(data.error||'onbekend');
+      return;
+    }
+    const head=document.createElement('div');
+    head.className='section';
+    head.textContent='SoundCloud — '+data.length+' resultaten';
+    scresults.appendChild(head);
+    for(const t of data){
+      t.source='SoundCloud online';
+      const row=baseRow(t,true);
+      const actions=document.createElement('div');
+      actions.className='actions';
+      const b=document.createElement('button');
+      b.textContent='LOAD';
+      b.onclick=()=>loadSoundCloud(t,b);
+      actions.appendChild(b);
+      row.appendChild(actions);
+      scresults.appendChild(row);
+    }
+    status.textContent='Kies een SoundCloud-nummer';
+  }finally{
+    document.getElementById('scsearch').disabled=false;
+  }
+}
+async function loadSoundCloud(t,b){
+  b.disabled=true;
+  status.textContent='SoundCloud downloaden...';
+  const u='/api/soundcloud/load?id='+encodeURIComponent(t.id)
+    +'&url='+encodeURIComponent(t.url)
+    +'&title='+encodeURIComponent(t.title||'')
+    +'&artist='+encodeURIComponent(t.artist||'');
+  const r=await fetch(u);
+  const x=await r.json();
+  if(!x.ok){
+    status.textContent='SoundCloud laden mislukt: '+(x.error||'onbekend');
+    b.disabled=false;
+    return;
+  }
+  const key=x.key;
+  for(let i=0;i<120;i++){
+    await new Promise(resolve=>setTimeout(resolve,1000));
+    const sr=await fetch('/api/soundcloud/status?key='+encodeURIComponent(key));
+    const s=await sr.json();
+    if(s.state==='done'){
+      status.textContent=s.deck
+        ? 'SoundCloud geladen op Deck '+s.deck
+        : 'SoundCloud opgeslagen: '+(s.message||'klaar');
+      b.disabled=false;
+      await tracks();
+      return;
+    }
+    if(s.state==='error'){
+      status.textContent='SoundCloud laden mislukt: '+(s.error||'onbekend');
+      b.disabled=false;
+      return;
+    }
+  }
+  status.textContent='SoundCloud download duurt langer; probeer Vernieuw';
+  b.disabled=false;
 }
 let timer;
 q.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(tracks,250)});
 q.addEventListener('keydown',e=>{if(e.key==='Enter')tracks()});
+scq.addEventListener('keydown',e=>{if(e.key==='Enter')searchSoundCloud()});
 document.getElementById('refresh').onclick=tracks;
+document.getElementById('scsearch').onclick=searchSoundCloud;
 tracks();
 </script>
 </body>
