@@ -1592,6 +1592,16 @@ void YouTubeFeature::maybeReleaseCachedTrack(const TrackPointer& pTrack) {
     if (!pTrack) {
         return;
     }
+#if defined(Q_OS_ANDROID)
+    // Keep user-selected YouTube tracks on Android. The REMOTE browser now
+    // presents cached online tracks together with the local library, so
+    // silently deleting a YouTube file as soon as it leaves the decks would
+    // make the user's curated list disappear. Manual cache cleanup remains
+    // available when the user actually wants to reclaim storage.
+    kLogger.debug() << "[Android] keeping cached YouTube track:"
+                    << pTrack->getLocation();
+    return;
+#endif
     const QString location = pTrack->getLocation();
     if (location.isEmpty()) {
         return;
