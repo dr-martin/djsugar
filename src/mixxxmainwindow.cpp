@@ -15,6 +15,7 @@
 #include <QUrl>
 
 #ifdef Q_OS_ANDROID
+#include <QHash>
 #include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -23,9 +24,11 @@
 #include <QNetworkInterface>
 #include <QPushButton>
 #include <QSqlDatabase>
+#include <QSet>
 #include <QSqlQuery>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTimer>
 #include <QUrlQuery>
 #endif
 
@@ -59,6 +62,7 @@
 #include "broadcast/broadcastmanager.h"
 #endif
 #include "control/controlindicatortimer.h"
+#include "control/controlobject.h"
 #include "library/library.h"
 #include "library/library_decl.h"
 #include "library/library_prefs.h"
@@ -68,6 +72,9 @@
 #include "library/library_prefs.h"
 #include "library/trackcollection.h"
 #include "library/trackcollectionmanager.h"
+#ifdef Q_OS_ANDROID
+#include "library/youtube/youtubefeature.h"
+#endif
 #include "mixer/playerinfo.h"
 #include "mixer/playermanager.h"
 #include "recording/recordingmanager.h"
@@ -76,6 +83,7 @@
 #include "soundio/soundmanager.h"
 #include "sources/soundsourceproxy.h"
 #include "track/track.h"
+#include "track/trackref.h"
 #include "util/debug.h"
 #include "util/desktophelper.h"
 #include "util/sandbox.h"
