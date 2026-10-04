@@ -925,7 +925,8 @@ tracks();
                 QRegularExpression(QStringLiteral("[^A-Za-z0-9_-]")),
                 QStringLiteral("_"));
         if (requestKey.isEmpty()) {
-            requestKey = QString::number(qHash(sourceUrl));
+            requestKey = QString::number(
+                    static_cast<qulonglong>(qHash(sourceUrl)));
         }
 
         // Reuse a SoundCloud track that has already been downloaded/imported.
