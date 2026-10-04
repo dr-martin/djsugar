@@ -2933,6 +2933,156 @@ void YouTubeService::downloadViaYtDlp(const QString& videoId, const QString& cac
             });
 }
 
+void YouTubeService::searchSoundCloudViaYtDlp(
+        const QString& query, int cap) {
+    if (m_ytDlpPath.isEmpty()) {
+        Q_EMIT soundCloudSearchFailed(query, tr("yt-dlp not available"));
+        return;
+    }
+    QStringList args = {
+            QStringLiteral("--flat-playlist"),
+            QStringLiteral("--skip-download"),
+            QStringLiteral("--dump-single-json"),
+            QStringLiteral("--ignore-errors"),
+            QStringLiteral("--no-warnings"),
+            QStringLiteral("--no-cache-dir"),
+            QStringLiteral("--ignore-config"),
+            QStringLiteral("scsearch%1:%2").arg(cap).arg(query),
+    };
+    runYtDlp(
+            args,
+            kSearchTimeoutMs,
+            [this, query, cap](const QByteArray& stdoutBytes) {
+                const QJsonObject root =
+                        QJsonDocument::fromJson(stdoutBytes).object();
+                const QJsonArray entries =
+                        root.value(QStringLiteral("entries")).toArray();
+                QList<SoundCloudTrackInfo> results;
+                results.reserve(qMin(entries.size(), cap));
+                QSet<QString> seen;
+                for (const QJsonValue& value : entries) {
+                    if (results.size() >= cap) {
+                        break;
+                    }
+                    const QJsonObject entry = value.toObject();
+                    SoundCloudTrackInfo info;
+                    info.id = entry.value(QStringLiteral("id")).toString();
+                    info.title = entry.value(QStringLiteral("title")).toString();
+                    info.uploader =
+                            entry.value(QStringLiteral("uploader")).toString();
+                    info.url =
+                            entry.value(QStringLiteral("webpage_url")).toString();
+                    if (info.url.isEmpty()) {
+                        info.url = entry.value(QStringLiteral("url")).toString();
+                    }
+                    const QJsonValue duration =
+                            entry.value(QStringLiteral("duration"));
+                    if (duration.isDouble()) {
+                        info.durationSec =
+                                qMax(0, static_cast<int>(duration.toDouble()));
+                    }
+                    const QString uniqueKey =
+                            !info.id.isEmpty() ? info.id : info.url;
+                    if (!uniqueKey.isEmpty() && !info.title.isEmpty() &&
+                            !info.url.isEmpty() && !seen.contains(uniqueKey)) {
+                        seen.insert(uniqueKey);
+                        results.append(info);
+                    }
+                }
+                Q_EMIT soundCloudSearchResultsReady(query, results);
+            },
+            [this, query](const QString& error) {
+                Q_EMIT soundCloudSearchFailed(query, error);
+            });
+}
+
+void YouTubeService::downloadSoundCloudViaYtDlp(
+        const QString& sourceUrl,
+        const QString& requestKey,
+        const QString& cacheDir,
+        const QString& title,
+        const QString& uploader) {
+    if (m_ytDlpPath.isEmpty()) {
+        Q_EMIT soundCloudDownloadFailed(
+                requestKey, tr("yt-dlp not available"));
+        return;
+    }
+
+    const QString baseName =
+            QStringLiteral("sc_%1").arg(requestKey);
+    const QString outTemplate =
+            QDir(cacheDir).filePath(baseName + QStringLiteral(".%(ext)s"));
+    QStringList args = {
+            QStringLiteral("-f"),
+            QStringLiteral("bestaudio"),
+            QStringLiteral("--extract-audio"),
+            QStringLiteral("--audio-format"),
+            QStringLiteral("m4a"),
+            QStringLiteral("--no-playlist"),
+            QStringLiteral("--no-warnings"),
+            QStringLiteral("--no-progress"),
+            QStringLiteral("--no-cache-dir"),
+            QStringLiteral("--ignore-config"),
+            QStringLiteral("--no-mtime"),
+            QStringLiteral("-o"),
+            outTemplate,
+            QStringLiteral("--print"),
+            QStringLiteral("after_move:filepath"),
+            QStringLiteral("--"),
+            sourceUrl,
+    };
+    runYtDlp(
+            args,
+            kDownloadTimeoutMs,
+            [this,
+                    requestKey,
+                    cacheDir,
+                    baseName,
+                    title,
+                    uploader,
+                    sourceUrl](const QByteArray& stdoutBytes) {
+                QString outPath;
+                const QList<QByteArray> lines = stdoutBytes.split('\n');
+                for (auto it = lines.crbegin(); it != lines.crend(); ++it) {
+                    const QString line =
+                            QString::fromLocal8Bit(*it).trimmed();
+                    if (!line.isEmpty() && QFileInfo::exists(line)) {
+                        outPath = line;
+                        break;
+                    }
+                }
+                if (outPath.isEmpty()) {
+                    const QDir dir(cacheDir);
+                    const QStringList existing = dir.entryList(
+                            {baseName + QStringLiteral(".*")},
+                            QDir::Files | QDir::NoDotAndDotDot);
+                    for (const QString& fileName : existing) {
+                        if (fileName.endsWith(QStringLiteral(".part")) ||
+                                fileName.endsWith(QStringLiteral(".json"))) {
+                            continue;
+                        }
+                        outPath = dir.filePath(fileName);
+                        break;
+                    }
+                }
+                if (outPath.isEmpty()) {
+                    Q_EMIT soundCloudDownloadFailed(
+                            requestKey,
+                            tr("SoundCloud download finished but no audio file was found"));
+                    return;
+                }
+                Q_EMIT soundCloudDownloadFinished(
+                        requestKey,
+                        outPath,
+                        title,
+                        uploader,
+                        sourceUrl);
+            },
+            [this, requestKey](const QString& error) {
+                Q_EMIT soundCloudDownloadFailed(requestKey, error);
+            });
+}
+
 #if defined(Q_OS_ANDROID) && defined(HAVE_YTDLP_ANDROID)
 // =============================================================================
 // Bundled youtubedl-android (JNI-based, no external dependencies)
