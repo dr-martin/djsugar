@@ -153,6 +153,44 @@ class AndroidRemoteLibraryServer final : public QTcpServer {
                                 &QObject::deleteLater);
                     }
                 });
+
+        auto* playedTimer = new QTimer(this);
+        playedTimer->setInterval(500);
+        connect(playedTimer,
+                &QTimer::timeout,
+                this,
+                [this]() {
+                    updatePlayedState();
+                });
+        playedTimer->start();
+
+        if (auto* pService = onlineAudioService()) {
+            connect(pService,
+                    &mixxx::YouTubeService::soundCloudDownloadFinished,
+                    this,
+                    [this](const QString& requestKey,
+                            const QString& localPath,
+                            const QString& title,
+                            const QString& uploader,
+                            const QString& sourceUrl) {
+                        finishSoundCloudDownload(requestKey,
+                                localPath,
+                                title,
+                                uploader,
+                                sourceUrl);
+                    });
+            connect(pService,
+                    &mixxx::YouTubeService::soundCloudDownloadFailed,
+                    this,
+                    [this](const QString& requestKey, const QString& error) {
+                        auto it = m_soundCloudJobs.find(requestKey);
+                        if (it == m_soundCloudJobs.end()) {
+                            return;
+                        }
+                        it->state = QStringLiteral("error");
+                        it->error = error;
+                    });
+        }
     }
 
     bool start() {
