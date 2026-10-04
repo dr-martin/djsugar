@@ -169,7 +169,7 @@
                 <status>0x80</status>
                 <midino>0x15</midino>
                 <group>[Channel1]</group>
-                <key>cue_default</key>
+                <key>cue_set</key>
                 <description></description>
                 <options>
                     <normal/>
@@ -563,7 +563,7 @@
                 <status>0x80</status>
                 <midino>0x2f</midino>
                 <group>[Channel2]</group>
-                <key>cue_default</key>
+                <key>cue_set</key>
                 <description></description>
                 <options>
                     <normal/>
@@ -713,7 +713,7 @@
                 <status>0x90</status>
                 <midino>0x15</midino>
                 <group>[Channel1]</group>
-                <key>cue_default</key>
+                <key>cue_set</key>
                 <description></description>
                 <options>
                     <normal/>
@@ -923,7 +923,7 @@
                 <status>0x90</status>
                 <midino>0x2f</midino>
                 <group>[Channel2]</group>
-                <key>cue_default</key>
+                <key>cue_set</key>
                 <description></description>
                 <options>
                     <normal/>
