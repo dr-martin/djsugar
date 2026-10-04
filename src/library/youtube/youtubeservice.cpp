@@ -1054,6 +1054,41 @@ void YouTubeService::downloadVideo(const QString& videoId, const QString& cacheD
             });
 }
 
+void YouTubeService::searchSoundCloud(const QString& query, int cap) {
+    const QString trimmed = query.trimmed();
+    if (trimmed.isEmpty()) {
+        Q_EMIT soundCloudSearchFailed(query, tr("Empty SoundCloud search"));
+        return;
+    }
+    cap = qBound(1, cap, 50);
+#if defined(Q_OS_ANDROID) && defined(HAVE_YTDLP_ANDROID)
+    searchSoundCloudViaAndroidBundled(trimmed, cap);
+#else
+    searchSoundCloudViaYtDlp(trimmed, cap);
+#endif
+}
+
+void YouTubeService::downloadSoundCloud(
+        const QString& sourceUrl,
+        const QString& requestKey,
+        const QString& cacheDir,
+        const QString& title,
+        const QString& uploader) {
+    if (sourceUrl.trimmed().isEmpty() || requestKey.trimmed().isEmpty()) {
+        Q_EMIT soundCloudDownloadFailed(
+                requestKey, tr("Invalid SoundCloud track"));
+        return;
+    }
+    QDir().mkpath(cacheDir);
+#if defined(Q_OS_ANDROID) && defined(HAVE_YTDLP_ANDROID)
+    downloadSoundCloudViaAndroidBundled(
+            sourceUrl, requestKey, cacheDir, title, uploader);
+#else
+    downloadSoundCloudViaYtDlp(
+            sourceUrl, requestKey, cacheDir, title, uploader);
+#endif
+}
+
 void YouTubeService::fetchTrending(const QString& region, int cap, int minResults) {
 #if defined(Q_OS_ANDROID)
     kLogger.info() << "[Android] fetchTrending: region=" << region
