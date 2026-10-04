@@ -444,6 +444,24 @@ tracks();
                 document.toJson(QJsonDocument::Compact));
     }
 
+    struct DeckPlaybackState {
+        int trackId = 0;
+        bool heardFromStart = false;
+        bool continuous = true;
+        double lastAudiblePosition = -1.0;
+        double maxAudiblePosition = 0.0;
+    };
+
+    struct SoundCloudJob {
+        QString state = QStringLiteral("pending");
+        QString error;
+        QString message;
+        QString title;
+        QString artist;
+        QString sourceUrl;
+        int deck = 0;
+    };
+
     QSqlDatabase database() const {
         auto pLibrary = m_pCoreServices->getLibrary();
         if (!pLibrary || !pLibrary->trackCollectionManager()) {
@@ -452,6 +470,221 @@ tracks();
         auto* pInternal =
                 pLibrary->trackCollectionManager()->internalCollection();
         return pInternal ? pInternal->database() : QSqlDatabase();
+    }
+
+    mixxx::YouTubeService* onlineAudioService() const {
+        auto pLibrary = m_pCoreServices->getLibrary();
+        if (!pLibrary || !pLibrary->youtubeFeature()) {
+            return nullptr;
+        }
+        return pLibrary->youtubeFeature()->service();
+    }
+
+    QString soundCloudCacheDir() const {
+        auto pLibrary = m_pCoreServices->getLibrary();
+        if (!pLibrary || !pLibrary->youtubeFeature()) {
+            return {};
+        }
+        const QString path = QDir(pLibrary->youtubeFeature()->cacheDir())
+                                     .filePath(QStringLiteral("soundcloud"));
+        QDir().mkpath(path);
+        return path;
+    }
+
+    int chooseSafeDeck() const {
+        const QString deck1 = PlayerManager::groupForDeck(0);
+        const QString deck2 = PlayerManager::groupForDeck(1);
+        const bool deck1Playing =
+                ControlObject::toBool(ConfigKey(deck1, QStringLiteral("play")));
+        const bool deck2Playing =
+                ControlObject::toBool(ConfigKey(deck2, QStringLiteral("play")));
+
+        if (deck1Playing && deck2Playing) {
+            return 0;
+        }
+        if (deck1Playing) {
+            return 2;
+        }
+        if (deck2Playing) {
+            return 1;
+        }
+
+        // Neither deck is playing. Prefer an actually empty deck before
+        // replacing a stopped/prepared track.
+        if (!PlayerInfo::instance().getTrackInfo(deck1)) {
+            return 1;
+        }
+        if (!PlayerInfo::instance().getTrackInfo(deck2)) {
+            return 2;
+        }
+        return 1;
+    }
+
+    bool loadTrackSafely(
+            const TrackPointer& pTrack, int* pDeck, QString* pError) {
+        if (!pTrack) {
+            if (pError) {
+                *pError = QStringLiteral("Track unavailable");
+            }
+            return false;
+        }
+        auto pPlayerManager = m_pCoreServices->getPlayerManager();
+        if (!pPlayerManager) {
+            if (pError) {
+                *pError = QStringLiteral("Player unavailable");
+            }
+            return false;
+        }
+
+        const int deck = chooseSafeDeck();
+        if (deck == 0) {
+            if (pError) {
+                *pError = QStringLiteral(
+                        "Beide decks spelen; er wordt niets overschreven");
+            }
+            return false;
+        }
+
+#ifdef __STEM__
+        pPlayerManager->slotLoadTrackToPlayer(
+                pTrack,
+                PlayerManager::groupForDeck(deck - 1),
+                mixxx::StemChannelSelection(),
+                false);
+#else
+        pPlayerManager->slotLoadTrackToPlayer(
+                pTrack,
+                PlayerManager::groupForDeck(deck - 1),
+                false);
+#endif
+        if (pDeck) {
+            *pDeck = deck;
+        }
+        return true;
+    }
+
+    void updatePlayedState() {
+        const int audibleDeck =
+                PlayerInfo::instance().getCurrentPlayingDeck();
+        for (int deckIndex = 0; deckIndex < 2; ++deckIndex) {
+            const QString group = PlayerManager::groupForDeck(deckIndex);
+            const TrackPointer pTrack =
+                    PlayerInfo::instance().getTrackInfo(group);
+            DeckPlaybackState& state = m_deckPlayback[deckIndex];
+
+            const int trackId =
+                    pTrack && pTrack->getId().isValid()
+                    ? pTrack->getId().toVariant().toInt()
+                    : 0;
+            if (trackId <= 0) {
+                state = DeckPlaybackState();
+                continue;
+            }
+            if (state.trackId != trackId) {
+                state = DeckPlaybackState();
+                state.trackId = trackId;
+            }
+
+            const bool playing = ControlObject::toBool(
+                    ConfigKey(group, QStringLiteral("play")));
+            if (!playing || audibleDeck != deckIndex) {
+                continue;
+            }
+
+            const double position = qBound(
+                    0.0,
+                    ControlObject::get(
+                            ConfigKey(group, QStringLiteral("playposition"))),
+                    1.0);
+            if (!state.heardFromStart && position <= 0.08) {
+                state.heardFromStart = true;
+                state.lastAudiblePosition = position;
+                state.maxAudiblePosition = position;
+            }
+            if (!state.heardFromStart) {
+                continue;
+            }
+
+            if (state.lastAudiblePosition >= 0.0) {
+                // A large jump means the listener skipped part of the track;
+                // do not call that a complete play.
+                if (position > state.lastAudiblePosition + 0.05 ||
+                        position + 0.03 < state.lastAudiblePosition) {
+                    state.continuous = false;
+                }
+            }
+            state.lastAudiblePosition = position;
+            state.maxAudiblePosition =
+                    qMax(state.maxAudiblePosition, position);
+
+            // PlayerInfo's currentPlayingDeck only considers decks that are
+            // actually routed into the main mix (play, pregain, channel volume
+            // and crossfader). PFL/headphone-only auditioning therefore never
+            // reaches this point.
+            if (state.continuous && state.maxAudiblePosition >= 0.95) {
+                m_playedTrackIds.insert(trackId);
+            }
+        }
+    }
+
+    void finishSoundCloudDownload(const QString& requestKey,
+            const QString& localPath,
+            const QString& title,
+            const QString& uploader,
+            const QString& sourceUrl) {
+        auto it = m_soundCloudJobs.find(requestKey);
+        if (it == m_soundCloudJobs.end()) {
+            SoundCloudJob job;
+            job.title = title;
+            job.artist = uploader;
+            job.sourceUrl = sourceUrl;
+            it = m_soundCloudJobs.insert(requestKey, job);
+        }
+
+        if (!QFileInfo::exists(localPath)) {
+            it->state = QStringLiteral("error");
+            it->error = QStringLiteral("Gedownload bestand ontbreekt");
+            return;
+        }
+
+        auto pTrackCollectionManager =
+                m_pCoreServices->getTrackCollectionManager();
+        if (!pTrackCollectionManager) {
+            it->state = QStringLiteral("error");
+            it->error = QStringLiteral("Bibliotheek niet beschikbaar");
+            return;
+        }
+
+        TrackPointer pTrack = pTrackCollectionManager->getOrAddTrack(
+                TrackRef::fromFilePath(localPath));
+        if (!pTrack) {
+            it->state = QStringLiteral("error");
+            it->error =
+                    QStringLiteral("SoundCloud-track kon niet worden toegevoegd");
+            return;
+        }
+
+        if (!uploader.isEmpty()) {
+            pTrack->setArtist(uploader);
+        }
+        if (!title.isEmpty()) {
+            pTrack->setTitle(title);
+        }
+        pTrack->setAlbum(QStringLiteral("SoundCloud"));
+        pTrack->setComment(sourceUrl);
+
+        int deck = 0;
+        QString error;
+        if (loadTrackSafely(pTrack, &deck, &error)) {
+            it->deck = deck;
+            it->message =
+                    QStringLiteral("SoundCloud-track geladen");
+        } else {
+            // The audio is still kept in the unified library. If both decks
+            // were playing, refusing to replace either is intentional.
+            it->message = error;
+        }
+        it->state = QStringLiteral("done");
     }
 
     void handleTracks(QTcpSocket* pSocket, const QUrlQuery& query) {
@@ -465,20 +698,20 @@ tracks();
             return;
         }
 
-        const QString search = query.queryItemValue(QStringLiteral("q")).trimmed();
+        const QString search =
+                query.queryItemValue(QStringLiteral("q")).trimmed();
         QSqlQuery sql(db);
         QString statement = QStringLiteral(
-                "SELECT library.id, library.title, library.artist, library.album "
+                "SELECT library.id, library.title, library.artist, library.album, "
+                "CASE "
+                "WHEN library.album = 'YouTube' THEN 'YouTube' "
+                "WHEN library.album = 'SoundCloud' THEN 'SoundCloud' "
+                "ELSE 'Lokaal' END "
                 "FROM library "
                 "JOIN track_locations ON track_locations.id = library.location "
                 "WHERE library.mixxx_deleted = 0 "
                 "AND track_locations.fs_deleted = 0 "
                 "AND TRIM(COALESCE(track_locations.location, '')) <> '' "
-                // Historical rescans can leave more than one active library
-                // row pointing at the same unique track_locations row. The
-                // browser must expose each physical file only once. Keep the
-                // oldest/original library row so existing metadata/cues are
-                // preferred over later duplicate rows.
                 "AND library.id = ("
                 "SELECT MIN(l2.id) FROM library l2 "
                 "WHERE l2.location = library.location "
@@ -494,19 +727,29 @@ tracks();
                 "library.title COLLATE NOCASE LIMIT 600");
         sql.prepare(statement);
         if (!search.isEmpty()) {
-            const QString searchPattern =
-                    QStringLiteral("%") + search + QStringLiteral("%");
-            sql.bindValue(QStringLiteral(":q"), QVariant(searchPattern));
+            sql.bindValue(
+                    QStringLiteral(":q"),
+                    QVariant(QStringLiteral("%") + search +
+                            QStringLiteral("%")));
         }
 
         QJsonArray rows;
         if (sql.exec()) {
             while (sql.next()) {
+                const int id = sql.value(0).toInt();
                 QJsonObject row;
-                row.insert(QStringLiteral("id"), sql.value(0).toInt());
-                row.insert(QStringLiteral("title"), sql.value(1).toString());
-                row.insert(QStringLiteral("artist"), sql.value(2).toString());
-                row.insert(QStringLiteral("album"), sql.value(3).toString());
+                row.insert(QStringLiteral("id"), id);
+                row.insert(
+                        QStringLiteral("title"), sql.value(1).toString());
+                row.insert(
+                        QStringLiteral("artist"), sql.value(2).toString());
+                row.insert(
+                        QStringLiteral("album"), sql.value(3).toString());
+                row.insert(
+                        QStringLiteral("source"), sql.value(4).toString());
+                row.insert(
+                        QStringLiteral("played"),
+                        m_playedTrackIds.contains(id));
                 rows.append(row);
             }
         }
@@ -515,17 +758,14 @@ tracks();
 
     void handleLoad(QTcpSocket* pSocket, const QUrlQuery& query) {
         bool idOk = false;
-        bool deckOk = false;
         const int id =
                 query.queryItemValue(QStringLiteral("id")).toInt(&idOk);
-        const int deck =
-                query.queryItemValue(QStringLiteral("deck")).toInt(&deckOk);
-        if (!idOk || !deckOk || id <= 0 || deck < 1 || deck > 2) {
+        if (!idOk || id <= 0) {
             sendJson(pSocket,
                     QJsonDocument(QJsonObject{
                             {QStringLiteral("ok"), false},
                             {QStringLiteral("error"),
-                                    QStringLiteral("Invalid id or deck")}}),
+                                    QStringLiteral("Invalid track id")}}),
                     QByteArrayLiteral("400 Bad Request"));
             return;
         }
@@ -548,9 +788,7 @@ tracks();
                     QByteArrayLiteral("404 Not Found"));
             return;
         }
-
-        const QString remoteTrackPath = sql.value(0).toString().trimmed();
-        if (remoteTrackPath.isEmpty()) {
+        if (sql.value(0).toString().trimmed().isEmpty()) {
             sendJson(pSocket,
                     QJsonDocument(QJsonObject{
                             {QStringLiteral("ok"), false},
@@ -560,41 +798,229 @@ tracks();
             return;
         }
 
-        // Load the existing library track by its database id. Reconstructing a
-        // TrackRef from the stored path is unreliable on Android shared/removable
-        // storage because canonical-path resolution can fail even though Mixxx
-        // already has a valid library track for the file.
-        auto pTrackCollectionManager = m_pCoreServices->getTrackCollectionManager();
-        auto pPlayerManager = m_pCoreServices->getPlayerManager();
+        auto pTrackCollectionManager =
+                m_pCoreServices->getTrackCollectionManager();
         const TrackPointer pTrack = pTrackCollectionManager
-                ? pTrackCollectionManager->getTrackById(TrackId(QVariant(id)))
+                ? pTrackCollectionManager->getTrackById(
+                          TrackId(QVariant(id)))
                 : TrackPointer();
-        if (!pPlayerManager || !pTrack) {
+
+        int deck = 0;
+        QString error;
+        if (!loadTrackSafely(pTrack, &deck, &error)) {
             sendJson(pSocket,
                     QJsonDocument(QJsonObject{
                             {QStringLiteral("ok"), false},
-                            {QStringLiteral("error"),
-                                    QStringLiteral("Track or player unavailable")}}),
-                    QByteArrayLiteral("503 Service Unavailable"));
+                            {QStringLiteral("error"), error}}),
+                    QByteArrayLiteral("409 Conflict"));
             return;
         }
 
-#ifdef __STEM__
-        pPlayerManager->slotLoadTrackToPlayer(
-                pTrack,
-                PlayerManager::groupForDeck(deck - 1),
-                mixxx::StemChannelSelection(),
-                false);
-#else
-        pPlayerManager->slotLoadTrackToPlayer(
-                pTrack,
-                PlayerManager::groupForDeck(deck - 1),
-                false);
-#endif
         sendJson(pSocket,
                 QJsonDocument(QJsonObject{
                         {QStringLiteral("ok"), true},
                         {QStringLiteral("deck"), deck}}));
+    }
+
+    void handleSoundCloudSearch(
+            QTcpSocket* pSocket, const QUrlQuery& query) {
+        const QString search =
+                query.queryItemValue(QStringLiteral("q")).trimmed();
+        auto* pService = onlineAudioService();
+        if (search.isEmpty() || !pService) {
+            sendJson(pSocket,
+                    QJsonDocument(QJsonObject{
+                            {QStringLiteral("error"),
+                                    QStringLiteral("SoundCloud unavailable")}}),
+                    QByteArrayLiteral("400 Bad Request"));
+            return;
+        }
+
+        auto* requestContext = new QObject(pSocket);
+        connect(pService,
+                &mixxx::YouTubeService::soundCloudSearchResultsReady,
+                requestContext,
+                [this, pSocket, requestContext, search](
+                        const QString& emittedQuery,
+                        const QList<mixxx::SoundCloudTrackInfo>& results) {
+                    if (emittedQuery != search ||
+                            requestContext->property("done").toBool()) {
+                        return;
+                    }
+                    requestContext->setProperty("done", true);
+                    QJsonArray rows;
+                    for (const auto& info : results) {
+                        QJsonObject row;
+                        row.insert(QStringLiteral("id"), info.id);
+                        row.insert(QStringLiteral("title"), info.title);
+                        row.insert(QStringLiteral("artist"), info.uploader);
+                        row.insert(QStringLiteral("url"), info.url);
+                        row.insert(
+                                QStringLiteral("duration"), info.durationSec);
+                        row.insert(QStringLiteral("source"),
+                                QStringLiteral("SoundCloud online"));
+                        rows.append(row);
+                    }
+                    sendJson(pSocket, QJsonDocument(rows));
+                    requestContext->deleteLater();
+                });
+        connect(pService,
+                &mixxx::YouTubeService::soundCloudSearchFailed,
+                requestContext,
+                [this, pSocket, requestContext, search](
+                        const QString& emittedQuery,
+                        const QString& error) {
+                    if (emittedQuery != search ||
+                            requestContext->property("done").toBool()) {
+                        return;
+                    }
+                    requestContext->setProperty("done", true);
+                    sendJson(pSocket,
+                            QJsonDocument(QJsonObject{
+                                    {QStringLiteral("error"), error}}),
+                            QByteArrayLiteral("502 Bad Gateway"));
+                    requestContext->deleteLater();
+                });
+        QTimer::singleShot(
+                45000,
+                requestContext,
+                [this, pSocket, requestContext]() {
+                    if (requestContext->property("done").toBool()) {
+                        return;
+                    }
+                    requestContext->setProperty("done", true);
+                    sendJson(pSocket,
+                            QJsonDocument(QJsonObject{
+                                    {QStringLiteral("error"),
+                                            QStringLiteral(
+                                                    "SoundCloud search timeout")}}),
+                            QByteArrayLiteral("504 Gateway Timeout"));
+                });
+        pService->searchSoundCloud(search, 30);
+    }
+
+    void handleSoundCloudLoad(
+            QTcpSocket* pSocket, const QUrlQuery& query) {
+        const QString id =
+                query.queryItemValue(QStringLiteral("id")).trimmed();
+        const QString sourceUrl =
+                query.queryItemValue(QStringLiteral("url")).trimmed();
+        const QString title =
+                query.queryItemValue(QStringLiteral("title")).trimmed();
+        const QString artist =
+                query.queryItemValue(QStringLiteral("artist")).trimmed();
+        auto* pService = onlineAudioService();
+        if (id.isEmpty() || sourceUrl.isEmpty() || !pService) {
+            sendJson(pSocket,
+                    QJsonDocument(QJsonObject{
+                            {QStringLiteral("ok"), false},
+                            {QStringLiteral("error"),
+                                    QStringLiteral("Invalid SoundCloud track")}}),
+                    QByteArrayLiteral("400 Bad Request"));
+            return;
+        }
+
+        QString requestKey = id;
+        requestKey.replace(
+                QRegularExpression(QStringLiteral("[^A-Za-z0-9_-]")),
+                QStringLiteral("_"));
+        if (requestKey.isEmpty()) {
+            requestKey = QString::number(qHash(sourceUrl));
+        }
+
+        // Reuse a SoundCloud track that has already been downloaded/imported.
+        QSqlDatabase db = database();
+        QSqlQuery existing(db);
+        existing.prepare(QStringLiteral(
+                "SELECT library.id, track_locations.location "
+                "FROM library "
+                "JOIN track_locations ON track_locations.id = library.location "
+                "WHERE library.mixxx_deleted = 0 "
+                "AND library.album = 'SoundCloud' "
+                "AND library.comment = :url "
+                "AND track_locations.fs_deleted = 0 "
+                "LIMIT 1"));
+        existing.bindValue(QStringLiteral(":url"), sourceUrl);
+        if (existing.exec() && existing.next() &&
+                QFileInfo::exists(existing.value(1).toString())) {
+            const int existingId = existing.value(0).toInt();
+            auto pTrackCollectionManager =
+                    m_pCoreServices->getTrackCollectionManager();
+            const TrackPointer pTrack = pTrackCollectionManager
+                    ? pTrackCollectionManager->getTrackById(
+                              TrackId(QVariant(existingId)))
+                    : TrackPointer();
+            SoundCloudJob job;
+            job.title = title;
+            job.artist = artist;
+            job.sourceUrl = sourceUrl;
+            int deck = 0;
+            QString error;
+            if (loadTrackSafely(pTrack, &deck, &error)) {
+                job.state = QStringLiteral("done");
+                job.deck = deck;
+                job.message = QStringLiteral("Bestaande SoundCloud-track geladen");
+            } else {
+                job.state = QStringLiteral("done");
+                job.message = error;
+            }
+            m_soundCloudJobs.insert(requestKey, job);
+            sendJson(pSocket,
+                    QJsonDocument(QJsonObject{
+                            {QStringLiteral("ok"), true},
+                            {QStringLiteral("key"), requestKey}}));
+            return;
+        }
+
+        auto existingJob = m_soundCloudJobs.constFind(requestKey);
+        if (existingJob == m_soundCloudJobs.constEnd() ||
+                existingJob->state != QStringLiteral("pending")) {
+            SoundCloudJob job;
+            job.title = title;
+            job.artist = artist;
+            job.sourceUrl = sourceUrl;
+            m_soundCloudJobs.insert(requestKey, job);
+            const QString cacheDir = soundCloudCacheDir();
+            if (cacheDir.isEmpty()) {
+                auto it = m_soundCloudJobs.find(requestKey);
+                it->state = QStringLiteral("error");
+                it->error = QStringLiteral("SoundCloud cache unavailable");
+            } else {
+                pService->downloadSoundCloud(sourceUrl,
+                        requestKey,
+                        cacheDir,
+                        title,
+                        artist);
+            }
+        }
+
+        sendJson(pSocket,
+                QJsonDocument(QJsonObject{
+                        {QStringLiteral("ok"), true},
+                        {QStringLiteral("key"), requestKey}}));
+    }
+
+    void handleSoundCloudStatus(
+            QTcpSocket* pSocket, const QUrlQuery& query) {
+        const QString key =
+                query.queryItemValue(QStringLiteral("key")).trimmed();
+        const auto it = m_soundCloudJobs.constFind(key);
+        if (it == m_soundCloudJobs.constEnd()) {
+            sendJson(pSocket,
+                    QJsonDocument(QJsonObject{
+                            {QStringLiteral("state"),
+                                    QStringLiteral("error")},
+                            {QStringLiteral("error"),
+                                    QStringLiteral("Unknown SoundCloud job")}}),
+                    QByteArrayLiteral("404 Not Found"));
+            return;
+        }
+        QJsonObject result;
+        result.insert(QStringLiteral("state"), it->state);
+        result.insert(QStringLiteral("deck"), it->deck);
+        result.insert(QStringLiteral("message"), it->message);
+        result.insert(QStringLiteral("error"), it->error);
+        sendJson(pSocket, QJsonDocument(result));
     }
 
     void handleSocket(QTcpSocket* pSocket) {
