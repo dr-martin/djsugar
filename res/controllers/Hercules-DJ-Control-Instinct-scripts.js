@@ -21,6 +21,18 @@ HCInstinct.init = function(id, debugging) {
 
     HCInstinct.allLedOff();
 
+    // DJ Sugar: the two overlaid waveforms must always have exactly the same
+    // time scale. The shared on-screen fader controls Channel1; mirror it to
+    // Channel2. Keep the connection for the lifetime of the controller.
+    HCInstinct.waveformZoomConnection = engine.makeConnection(
+        "[Channel1]", "waveform_zoom", function(value) {
+            if (engine.getValue("[Channel2]", "waveform_zoom") !== value) {
+                engine.setValue("[Channel2]", "waveform_zoom", value);
+            }
+        });
+    engine.setValue("[Channel2]", "waveform_zoom",
+        engine.getValue("[Channel1]", "waveform_zoom"));
+
     // Switch-on some LEDs for improve the usability
     // midi.sendShortMsg(0x90, 46, 0x7F);    // Automix LED
     // midi.sendShortMsg(0x90, 14, 0x7F);    // Cue deck A LED
@@ -140,6 +152,17 @@ HCInstinct.knobIncrement = function (group, action, minValue, maxValue, centralV
     return newValue;
 };
 
+
+
+// CUE buttons: pulse cue_set explicitly on Note On. This avoids the Android
+// MIDI path depending on the release message and makes the cue land exactly at
+// the current jogged position.
+HCInstinct.cueSet = function(channel, control, value, status, group) {
+    if (value > 0) {
+        engine.setValue(group, "cue_set", 1);
+        engine.setValue(group, "cue_set", 0);
+    }
+};
 
 
 // Pitch +/-
