@@ -426,7 +426,7 @@ bool WaveformWidgetFactory::setConfig(UserSettingsPointer config) {
     // waveform widgets cannot be reliably stacked on Android because each
     // viewer owns a native child window. Force the QWidget/QPainter filtered
     // renderer so both deck waveforms can be composited in one shared view.
-    type = WaveformWidgetType::Filtered;
+    type = WaveformWidgetType::Simple;
     ok = true;
 #endif
     // Store the widget type on m_configType for later initialization.
