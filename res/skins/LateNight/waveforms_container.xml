@@ -25,70 +25,56 @@
             </Children>
           </WidgetGroup>
 
+          <!-- DJ Sugar: shared beatmatching view. Deck 1 (red) and Deck 2
+               (green) occupy exactly the same pixels. QStackedLayout StackAll
+               keeps both waveform viewers visible. -->
           <WidgetGroup>
+            <ObjectName>DJSugarSharedWaveform</ObjectName>
             <Layout>vertical</Layout>
             <Size>100me,40me</Size>
             <Children>
-
               <WidgetGroup>
-                <Layout>horizontal</Layout>
-                <SizePolicy>me,me</SizePolicy>
-                <Children>
-                  <Template src="skins:LateNight/waveform.xml">
-                    <SetVariable name="ChanNum">3</SetVariable>
-                    <SetVariable name="SignalColor"><Variable name="SignalColor_34"/></SetVariable>
-                    <SetVariable name="BgColorWaveform"><Variable name="BgColorWaveform_34"/></SetVariable>
-                    <SetVariable name="Highlight">[Skin],show_4decks</SetVariable>
-                  </Template>
-                </Children>
-                <Connection>
-                  <ConfigKey persist="true">[Skin],show_4decks</ConfigKey>
-                  <BindProperty>visible</BindProperty>
-                </Connection>
-              </WidgetGroup>
-
-              <WidgetGroup>
-                <Layout>horizontal</Layout>
+                <ObjectName>DJSugarWaveformOverlay</ObjectName>
+                <Layout>stacked</Layout>
                 <SizePolicy>me,me</SizePolicy>
                 <Children>
                   <Template src="skins:LateNight/waveform.xml">
                     <SetVariable name="ChanNum">1</SetVariable>
-                    <SetVariable name="SignalColor"><Variable name="SignalColor_12"/></SetVariable>
-                    <SetVariable name="BgColorWaveform"><Variable name="BgColorWaveform_12"/></SetVariable>
+                    <SetVariable name="SignalColor">#ff2020</SetVariable>
+                    <SetVariable name="BgColorWaveform">#000000</SetVariable>
                     <SetVariable name="Highlight">[Skin],show_4decks</SetVariable>
                   </Template>
-                </Children>
-              </WidgetGroup>
-
-              <WidgetGroup>
-                <Layout>horizontal</Layout>
-                <SizePolicy>me,me</SizePolicy>
-                <Children>
                   <Template src="skins:LateNight/waveform.xml">
                     <SetVariable name="ChanNum">2</SetVariable>
-                    <SetVariable name="SignalColor"><Variable name="SignalColor_12"/></SetVariable>
-                    <SetVariable name="BgColorWaveform"><Variable name="BgColorWaveform_12"/></SetVariable>
+                    <SetVariable name="SignalColor">#20ff40</SetVariable>
+                    <SetVariable name="BgColorWaveform">#00000000</SetVariable>
                     <SetVariable name="Highlight">[Skin],show_4decks</SetVariable>
                   </Template>
                 </Children>
               </WidgetGroup>
 
+              <!-- One zoom fader for the shared view. Channel 2 is mirrored by
+                   the Hercules script, so both decks always use the same scale. -->
               <WidgetGroup>
+                <ObjectName>DJSugarWaveformZoomRow</ObjectName>
                 <Layout>horizontal</Layout>
-                <SizePolicy>me,me</SizePolicy>
+                <Size>100me,22f</Size>
                 <Children>
-                  <Template src="skins:LateNight/waveform.xml">
-                    <SetVariable name="ChanNum">4</SetVariable>
-                    <SetVariable name="SignalColor"><Variable name="SignalColor_34"/></SetVariable>
-                    <SetVariable name="BgColorWaveform"><Variable name="BgColorWaveform_34"/></SetVariable>
-                  </Template>
+                  <Label><Size>20f,20f</Size><Text>-</Text><Alignment>center</Alignment></Label>
+                  <SliderComposed>
+                    <ObjectName>DJSugarSharedWaveformZoom</ObjectName>
+                    <Size>me,20f</Size>
+                    <TooltipId>waveform_display</TooltipId>
+                    <Handle scalemode="STRETCH_ASPECT">skins:LateNight/<Variable name="SliderScheme"/>/sliders/knob_crossfader.svg</Handle>
+                    <Slider scalemode="STRETCH">skins:LateNight/<Variable name="SliderScheme"/>/sliders/slider_crossfader.svg</Slider>
+                    <Horizontal>true</Horizontal>
+                    <Connection>
+                      <ConfigKey>[Channel1],waveform_zoom</ConfigKey>
+                    </Connection>
+                  </SliderComposed>
+                  <Label><Size>20f,20f</Size><Text>+</Text><Alignment>center</Alignment></Label>
                 </Children>
-                <Connection>
-                  <ConfigKey persist="true">[Skin],show_4decks</ConfigKey>
-                  <BindProperty>visible</BindProperty>
-                </Connection>
               </WidgetGroup>
-
             </Children>
           </WidgetGroup>
 
