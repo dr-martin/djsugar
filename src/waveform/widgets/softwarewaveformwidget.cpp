@@ -24,7 +24,15 @@ SoftwareWaveformWidget::SoftwareWaveformWidget(const QString& group,
     addRenderer<WaveformRenderMark>();
 
     setAttribute(Qt::WA_NoSystemBackground);
+#ifdef Q_OS_ANDROID
+    // DJ Sugar overlays the two software waveform widgets. Do not advertise
+    // opaque painting here: the upper deck intentionally has a transparent
+    // background so the lower deck remains visible.
+    setAttribute(Qt::WA_TranslucentBackground);
+    setAttribute(Qt::WA_OpaquePaintEvent, false);
+#else
     setAttribute(Qt::WA_OpaquePaintEvent);
+#endif
 
     m_initSuccess = init();
 }
