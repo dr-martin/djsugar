@@ -526,7 +526,12 @@ void SoundManagerConfig::loadDefaults(SoundManager* soundManager, unsigned int f
                 m_api = SoundManagerConfig::kAPIDirectSound;
             }
 #endif
-#ifdef Q_OS_IOS
+#ifdef Q_OS_ANDROID
+            // Android uses the PortAudio/Oboe backend. Unlike the desktop
+            // platforms above there is no fixed API name constant here, so
+            // select the first host API reported by PortAudio.
+            m_api = apiList.first();
+#elif defined(Q_OS_IOS)
             m_api = SoundManagerConfig::kAPIIosAudio;
 #elif defined(Q_OS_MACOS)
             m_api = SoundManagerConfig::kAPICoreAudio;

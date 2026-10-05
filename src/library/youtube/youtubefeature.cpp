@@ -17,6 +17,7 @@
 #include <QTextBrowser>
 #include <QTimer>
 #include <QUrl>
+#include <QUrlQuery>
 
 #include "analyzer/analyzerscheduledtrack.h"
 #include "control/controlproxy.h"
@@ -49,6 +50,10 @@ constexpr int kSearchResultsMax = 50;
 #else
 constexpr int kSearchResultsMax = 100;
 #endif
+
+// Playlist imports are deliberately capped to keep a pasted radio/mix URL
+// from exploding into an unbounded dynamic queue on a phone.
+constexpr int kPlaylistResultsMax = 100;
 
 // Upper duration bound (seconds) for items shown in the trending/home feed.
 // The Greek "top songs" feed otherwise mixes in hour-long "megamix" / "best
@@ -1098,7 +1103,19 @@ void YouTubeFeature::searchAndActivate(const QString& query) {
         m_pTrackModel->setSearch(query);
     }
     replaceTrackTable({});
-    m_service.searchVideos(query, kSearchResultsMax, kSearchResultsMax);
+    const QUrl maybeUrl = QUrl::fromUserInput(query.trimmed());
+    const QString host = maybeUrl.host().toLower();
+    const QUrlQuery urlQuery(maybeUrl);
+    const bool isYouTubePlaylistUrl =
+            (host == QStringLiteral("youtube.com") ||
+                    host.endsWith(QStringLiteral(".youtube.com")) ||
+                    host == QStringLiteral("youtu.be")) &&
+            !urlQuery.queryItemValue(QStringLiteral("list")).isEmpty();
+    if (isYouTubePlaylistUrl) {
+        m_service.fetchPlaylist(query, kPlaylistResultsMax);
+    } else {
+        m_service.searchVideos(query, kSearchResultsMax, kSearchResultsMax);
+    }
 }
 
 void YouTubeFeature::onSearchResultsReady(
@@ -1292,6 +1309,18 @@ void YouTubeFeature::requestDownloadFile(const QString& videoId) {
         if (isYouTubeSidecarFile(f)) {
             continue;
         }
+#if defined(Q_OS_ANDROID)
+        // Older Android builds downloaded bestaudio as WebM/Opus. The file is
+        // valid, but the Android deck decoder in this build cannot load it.
+        // Remove that stale cache entry so the new M4A path can redownload it.
+        if (QFileInfo(f).suffix().compare(QStringLiteral("webm"),
+                    Qt::CaseInsensitive) == 0) {
+            kLogger.info() << "[Android] removing incompatible cached WebM:"
+                           << dir.filePath(f);
+            QFile::remove(dir.filePath(f));
+            continue;
+        }
+#endif
         onDownloadFinished(videoId, dir.filePath(f));
         return;
     }
@@ -1375,6 +1404,32 @@ void YouTubeFeature::onDownloadFinished(
             break;
         }
     }
+    // A download may finish after the user has started another search. In that
+    // case m_lastResults no longer contains this video and older code replaced
+    // the good placeholder metadata with the raw 11-character video id and an
+    // empty artist. Recover the existing table metadata before updating.
+    if (uploader.isEmpty() || title.isEmpty() || title == videoId ||
+            durationSec <= 0) {
+        QSqlQuery existing(m_pTrackCollection->database());
+        existing.prepare(QStringLiteral(
+                "SELECT artist, title, duration FROM youtube_library "
+                "WHERE comment = :comment LIMIT 1"));
+        existing.bindValue(QStringLiteral(":comment"), videoId);
+        if (existing.exec() && existing.next()) {
+            if (uploader.isEmpty()) {
+                uploader = existing.value(0).toString();
+            }
+            const QString existingTitle = existing.value(1).toString();
+            if ((title.isEmpty() || title == videoId) &&
+                    !existingTitle.isEmpty() && existingTitle != videoId) {
+                title = existingTitle;
+            }
+            if (durationSec <= 0) {
+                durationSec = existing.value(2).toInt();
+            }
+        }
+    }
+
     upsertDownloadedRow(videoId, localPath, title, uploader, durationSec);
 
     // Always register with the track collection so analysis runs and the DB
@@ -1470,12 +1525,23 @@ void YouTubeFeature::onDownloadFailed(const QString& videoId, const QString& err
         return;
     }
     // Exhausted retries — give up and clean up pending state.
+    const bool wasDeckLoad = m_pendingPlayerLoads.contains(videoId);
     m_downloadRetryCount.remove(videoId);
     m_pendingPlayerLoads.remove(videoId);
     m_pendingAutoDjLoads.remove(videoId);
     kLogger.warning() << "YouTube download failed for" << videoId
                       << "after" << kMaxDownloadRetries + 1
                       << "attempts:" << error;
+#if defined(Q_OS_ANDROID)
+    if (wasDeckLoad) {
+        QMessageBox::warning(nullptr,
+                tr("YouTube track could not be loaded"),
+                tr("DJ Sugar could not download this YouTube track.\n\n%1")
+                        .arg(error));
+    }
+#else
+    Q_UNUSED(wasDeckLoad);
+#endif
 }
 
 void YouTubeFeature::onTrackAnalysisProgress(
@@ -1526,6 +1592,16 @@ void YouTubeFeature::maybeReleaseCachedTrack(const TrackPointer& pTrack) {
     if (!pTrack) {
         return;
     }
+#if defined(Q_OS_ANDROID)
+    // Keep user-selected YouTube tracks on Android. The REMOTE browser now
+    // presents cached online tracks together with the local library, so
+    // silently deleting a YouTube file as soon as it leaves the decks would
+    // make the user's curated list disappear. Manual cache cleanup remains
+    // available when the user actually wants to reclaim storage.
+    kLogger.debug() << "[Android] keeping cached YouTube track:"
+                    << pTrack->getLocation();
+    return;
+#endif
     const QString location = pTrack->getLocation();
     if (location.isEmpty()) {
         return;
@@ -2119,8 +2195,10 @@ void YouTubeFeature::upsertDownloadedRow(const QString& videoId,
     upd.prepare(QStringLiteral(
             "UPDATE youtube_library SET "
             "location = :location, "
-            "title = :title, "
-            "artist = :artist, "
+            "title = CASE "
+            "  WHEN :title = '' OR :title = :comment THEN title "
+            "  ELSE :title END, "
+            "artist = CASE WHEN :artist = '' THEN artist ELSE :artist END, "
             "duration = COALESCE(NULLIF(duration, 0), :duration) "
             "WHERE comment = :comment"));
     upd.bindValue(QStringLiteral(":location"), localPath);

@@ -33,19 +33,19 @@
               <WidgetGroup>
                 <ObjectName>BpmTapContainer</ObjectName>
                 <!-- same width as total width of SyncBox children (40 + 22) -->
-                <Size>62f,42f</Size>
+                <Size>94f,66f</Size>
                 <Children>
                   <!-- BPM + rate -->
                   <WidgetGroup>
                     <ObjectName>AlignCenter</ObjectName>
                     <Pos>0,0</Pos>
                     <Layout>vertical</Layout>
-                    <Size>62f,42f</Size>
+                    <Size>94f,66f</Size>
                     <Children>
                       <Number>
                         <ObjectName>BpmText</ObjectName>
                         <TooltipId>visual_bpm</TooltipId>
-                        <Size>62f,22f</Size>
+                        <Size>94f,36f</Size>
                         <Alignment>center</Alignment>
                         <NumberOfDigits>2</NumberOfDigits>
                         <Connection>
@@ -65,7 +65,7 @@
                   <BpmEditor>
                     <TooltipId>visual_bpm_edit</TooltipId>
                     <Pos>0,0</Pos>
-                    <Size>62f,42f</Size>
+                    <Size>94f,66f</Size>
                     <Group><Variable name="Group"/></Group>
                   </BpmEditor>
                 </Children>
@@ -79,7 +79,7 @@
                   <PushButton>
                     <TooltipId>sync_enabled</TooltipId>
                     <ObjectName>SyncDeck</ObjectName>
-                    <Size>40f,22f</Size>
+                    <Size>60f,44f</Size>
                     <NumberStates>2</NumberStates>
                     <RightClickIsPushButton>true</RightClickIsPushButton>
                     <Connection>
@@ -94,7 +94,7 @@
                   <PushButton>
                     <TooltipId>sync_leader</TooltipId>
                     <ObjectName>SyncLeader</ObjectName>
-                    <Size>22f,22f</Size>
+                    <Size>44f,44f</Size>
                     <NumberStates>3</NumberStates>
                     <Connection>
                       <ConfigKey><Variable name="Group"/>,sync_leader</ConfigKey>
@@ -124,12 +124,12 @@
 
                   <WidgetGroup><!-- Rate controls (no Sync button) -->
                     <ObjectName>RateSliderBoxCompact</ObjectName>
-                    <Size>59f,97f</Size>
+                    <Size>68f,112f</Size>
                     <Layout>stacked</Layout>
                     <Children>
                       <WidgetGroup><!-- Rate slider + center indicator -->
                         <ObjectName></ObjectName>
-                        <Size>54f,97f</Size>
+                        <Size>62f,112f</Size>
                         <Children>
                           <Label>
                             <ObjectName>RateCenter</ObjectName>
@@ -143,7 +143,7 @@
 
                           <SliderComposed>
                             <ObjectName>RateSlider</ObjectName>
-                            <Size>40f,95f</Size>
+                            <Size>48f,110f</Size>
                             <Pos>10,2</Pos>
                             <TooltipId>rate</TooltipId>
                             <Handle scalemode="STRETCH_ASPECT">skins:LateNight/<Variable name="SliderScheme"/>/sliders/knob_pitch_deck.svg</Handle>
@@ -185,7 +185,7 @@
                     <Children>
 
                       <WidgetGroup><!-- Rate slider + center indicator -->
-                        <Size>54f,81f</Size>
+                        <Size>62f,96f</Size>
                         <Children>
                           <Label>
                             <ObjectName>RateCenter</ObjectName>
@@ -198,7 +198,7 @@
                           </Label>
                           <SliderComposed>
                             <ObjectName>RateSlider</ObjectName>
-                            <Size>40f,79f</Size>
+                            <Size>48f,94f</Size>
                             <Pos>10,2</Pos>
                             <TooltipId>rate</TooltipId>
                             <Handle scalemode="STRETCH_ASPECT">skins:LateNight/<Variable name="SliderScheme"/>/sliders/knob_pitch_deck.svg</Handle>

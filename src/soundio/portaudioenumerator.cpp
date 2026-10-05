@@ -125,27 +125,54 @@ void PortAudioEnumerator::initialize() {
                     name.append(QStringLiteral(": %1").arg(maybeName.value()));
                 }
                 int32_t id = device->callMethod<jint>("getId");
-                auto channelCounts = device->callMethod<QJniArray<jint>>("getChannelCounts");
-                int channelCount = *std::max_element(
-                        channelCounts.begin(), channelCounts.end());
-                auto sampleRates = device->callMethod<QJniArray<jint>>("getSampleRates");
+                auto channelCounts =
+                        device->callMethod<QJniArray<jint>>("getChannelCounts");
+                // Android explicitly documents an empty getChannelCounts()
+                // array as "arbitrary channel counts". Do not dereference an
+                // empty range and do not discard the device. Stereo is the
+                // safest fallback; USB multichannel devices (such as DJ
+                // controllers) normally report their real count explicitly.
+                int channelCount = 2;
+                if (!channelCounts.isEmpty()) {
+                    channelCount = *std::max_element(
+                            channelCounts.begin(), channelCounts.end());
+                }
+
+                auto sampleRates =
+                        device->callMethod<QJniArray<jint>>("getSampleRates");
+                // Likewise, Android defines an empty getSampleRates() array as
+                // support for arbitrary rates. The previous code registered a
+                // device only when this array was non-empty, which can make
+                // every Android output disappear from Sound Hardware. Use
+                // 48 kHz as a normal Android/DJ fallback and prefer it when it
+                // is explicitly advertised.
+                int sampleRate = 48000;
+                if (!sampleRates.isEmpty()) {
+                    sampleRate = *sampleRates.cbegin();
+                    for (const jint rate : sampleRates) {
+                        if (rate == 48000) {
+                            sampleRate = 48000;
+                            break;
+                        }
+                    }
+                }
+
                 qDebug() << "audioManager - Type:" << type
                          << "- Name:" << name
                          << "- ChannelCount:" << channelCount
-                         << channelCounts.size();
-                if (!sampleRates.isEmpty()) {
-                    int sampleRate = *sampleRates.cbegin();
-                    qDebug() << "audioManager - SampleRates:" << sampleRate;
-                    auto result = PaOboe_RegisterDevice(name.toStdString().c_str(),
-                            id,
-                            direction,
-                            channelCount,
-                            sampleRate);
-                    if (result != paNoError) {
-                        qWarning()
-                                << "Error registering device to PortAudio:"
-                                << Pa_GetErrorText(result);
-                    }
+                         << "- ChannelCountChoices:" << channelCounts.size()
+                         << "- SampleRate:" << sampleRate
+                         << "- SampleRateChoices:" << sampleRates.size();
+
+                auto result = PaOboe_RegisterDevice(name.toStdString().c_str(),
+                        id,
+                        direction,
+                        channelCount,
+                        sampleRate);
+                if (result != paNoError) {
+                    qWarning()
+                            << "Error registering device to PortAudio:"
+                            << Pa_GetErrorText(result);
                 }
             }
         };

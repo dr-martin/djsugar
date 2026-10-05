@@ -701,12 +701,16 @@ void CoreServices::initialize(QGuiApplication* pApp) {
             androidRoots.append(appMusicDir);
         }
 
-        // 2. If we have broad storage access, also scan external volumes.
+        // 2. If we have broad storage access, scan the public Music
+        //    directory instead of the entire primary shared-storage root.
+        //    Registering /storage/emulated/0 made DJ Sugar watch the whole
+        //    phone and also re-added that directory after the user removed it.
         if (hasAllFilesAccess) {
-            const QString primaryStorage = QStringLiteral("/storage/emulated/0");
-            if (QFileInfo::exists(primaryStorage) &&
-                    !androidRoots.contains(primaryStorage)) {
-                androidRoots.append(primaryStorage);
+            const QString primaryMusic =
+                    QStringLiteral("/storage/emulated/0/Music");
+            if (QFileInfo::exists(primaryMusic) &&
+                    !androidRoots.contains(primaryMusic)) {
+                androidRoots.append(primaryMusic);
             }
             const QDir storageDir(QStringLiteral("/storage"));
             const QStringList volumes = storageDir.entryList(
@@ -812,35 +816,31 @@ void CoreServices::initialize(QGuiApplication* pApp) {
     // longer empty and the real music volume never gets scanned — leaving the
     // library permanently empty even after the user grants the permission.
     //
-    // So: once all-files access is granted, make sure the primary shared-storage
-    // volume itself is registered (unless an existing root already covers it),
-    // then force a rescan so the music that only became readable after the grant
-    // finally appears. addDirectory() transparently replaces any now-redundant
-    // child roots (e.g. the app-specific fallback) when a parent is added.
+    // Once all-files access is granted, make sure only the public Music
+    // directory is registered. Do not automatically register
+    // /storage/emulated/0: the user may deliberately remove that broad root.
     {
         const bool hasAllFilesAccess = QJniObject::callStaticMethod<jboolean>(
                 "android/os/Environment", "isExternalStorageManager");
         if (hasAllFilesAccess) {
-            const QString primaryStorage = QStringLiteral("/storage/emulated/0");
-            // Is the primary volume already watched, either directly or via an
-            // ancestor root? If so, skip the add to avoid the "already in your
-            // library" dialog; the rescan below still picks up its contents.
-            bool primaryCovered = false;
+            const QString primaryMusic =
+                    QStringLiteral("/storage/emulated/0/Music");
+            bool primaryMusicCovered = false;
             const QStringList rootDirs =
                     m_pTrackCollectionManager->internalCollection()
                             ->getRootDirStrings();
             for (const QString& root : rootDirs) {
-                if (primaryStorage == root ||
-                        primaryStorage.startsWith(root + QLatin1Char('/'))) {
-                    primaryCovered = true;
+                if (primaryMusic == root ||
+                        primaryMusic.startsWith(root + QLatin1Char('/'))) {
+                    primaryMusicCovered = true;
                     break;
                 }
             }
-            if (!primaryCovered && QFileInfo::exists(primaryStorage) &&
-                    m_pLibrary->requestAddDir(primaryStorage, /*silent=*/true)) {
-                qInfo() << "Android library: registered primary storage after "
+            if (!primaryMusicCovered && QFileInfo::exists(primaryMusic) &&
+                    m_pLibrary->requestAddDir(primaryMusic, /*silent=*/true)) {
+                qInfo() << "Android library: registered public Music directory after "
                            "all-files-access grant"
-                        << primaryStorage;
+                        << primaryMusic;
                 musicDirAdded = true;
             }
             // Force a rescan so storage that became readable only after the

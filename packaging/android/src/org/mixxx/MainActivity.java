@@ -2,17 +2,28 @@ package org.mixxx;
 
 import android.Manifest;
 import android.content.Intent;
+import android.content.ContentResolver;
+import android.content.ContentUris;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.database.Cursor;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Process;
 import android.provider.Settings;
+import android.provider.MediaStore;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import org.qtproject.qt.android.QtActivityBase;
 
 public class MainActivity extends QtActivityBase {
@@ -24,6 +35,7 @@ public class MainActivity extends QtActivityBase {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        sInstance = this;
 
         // ─── Performance: keep CPU awake and screen on during mixing ───
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -171,6 +183,194 @@ public class MainActivity extends QtActivityBase {
         } catch (Exception e) {
             startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
         }
+    }
+
+    /**
+     * Copy an audio file from shared/removable storage through MediaStore into
+     * an app-private destination. Native decoders may be denied direct access
+     * to /storage/... on recent Android versions even when the library scanner
+     * can enumerate the file. ContentResolver is the supported Android path.
+     */
+    public static boolean copyAudioViaMediaStore(String sourcePath, String targetPath) {
+        MainActivity activity = sInstance;
+        if (activity == null || sourcePath == null || targetPath == null) {
+            return false;
+        }
+        return activity.copyAudioViaMediaStoreImpl(sourcePath, targetPath);
+    }
+
+    private static volatile MainActivity sInstance;
+
+    private boolean copyStreamToPrivateFile(InputStream in, File target) {
+        if (in == null) {
+            return false;
+        }
+        File parent = target.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            return false;
+        }
+        try (InputStream input = in;
+             OutputStream out = new FileOutputStream(target, false)) {
+            byte[] buffer = new byte[1024 * 1024];
+            long total = 0;
+            int count;
+            while ((count = input.read(buffer)) >= 0) {
+                if (count > 0) {
+                    out.write(buffer, 0, count);
+                    total += count;
+                }
+            }
+            out.flush();
+            return total > 0 && target.isFile() && target.length() > 0;
+        } catch (Exception e) {
+            if (target.exists()) {
+                target.delete();
+            }
+            return false;
+        }
+    }
+
+    private boolean copyAudioViaMediaStoreImpl(String sourcePath, String targetPath) {
+        ContentResolver resolver = getContentResolver();
+
+        String normalized = sourcePath.replace('\\', '/');
+        int slash = normalized.lastIndexOf('/');
+        if (slash < 0 || slash == normalized.length() - 1) {
+            return false;
+        }
+        String displayName = normalized.substring(slash + 1);
+
+        String relativePath = null;
+        final String primaryPrefix = "/storage/emulated/0/";
+        if (normalized.startsWith(primaryPrefix)) {
+            String relativeFile = normalized.substring(primaryPrefix.length());
+            int relSlash = relativeFile.lastIndexOf('/');
+            relativePath = relSlash >= 0 ? relativeFile.substring(0, relSlash + 1) : "";
+        } else if (normalized.startsWith("/storage/")) {
+            // Removable storage is typically /storage/VOLUME-ID/path/to/file.
+            int volumeEnd = normalized.indexOf('/', "/storage/".length());
+            if (volumeEnd >= 0 && volumeEnd + 1 < normalized.length()) {
+                String relativeFile = normalized.substring(volumeEnd + 1);
+                int relSlash = relativeFile.lastIndexOf('/');
+                relativePath = relSlash >= 0 ? relativeFile.substring(0, relSlash + 1) : "";
+            }
+        }
+
+        Set<Uri> collections = new LinkedHashSet<>();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                for (String volumeName : MediaStore.getExternalVolumeNames(this)) {
+                    collections.add(MediaStore.Audio.Media.getContentUri(volumeName));
+                    collections.add(MediaStore.Files.getContentUri(volumeName));
+                }
+            } catch (Exception ignored) {
+                // Fall back to the traditional external collection below.
+            }
+        }
+        collections.add(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI);
+        collections.add(MediaStore.Files.getContentUri("external"));
+
+        Uri found = null;
+        for (Uri collection : collections) {
+            Cursor cursor = null;
+            try {
+                String[] projection = new String[] { MediaStore.Audio.Media._ID };
+
+                // First try an exact absolute-path lookup. DATA is deprecated
+                // but remains useful on devices/volumes where it is exposed.
+                try {
+                    cursor = resolver.query(
+                            collection,
+                            projection,
+                            MediaStore.MediaColumns.DATA + "=?",
+                            new String[] { normalized },
+                            null);
+                    if (cursor != null && cursor.moveToFirst()) {
+                        long id = cursor.getLong(0);
+                        found = ContentUris.withAppendedId(collection, id);
+                    }
+                } catch (Exception ignored) {
+                    // Scoped-storage devices may reject DATA. Use the modern
+                    // DISPLAY_NAME + RELATIVE_PATH lookup below.
+                } finally {
+                    if (cursor != null) {
+                        cursor.close();
+                        cursor = null;
+                    }
+                }
+
+                if (found == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                        && relativePath != null) {
+                    cursor = resolver.query(
+                            collection,
+                            projection,
+                            MediaStore.MediaColumns.DISPLAY_NAME + "=? AND " +
+                                    MediaStore.MediaColumns.RELATIVE_PATH + "=?",
+                            new String[] { displayName, relativePath },
+                            null);
+                    if (cursor != null && cursor.moveToFirst()) {
+                        long id = cursor.getLong(0);
+                        found = ContentUris.withAppendedId(collection, id);
+                    }
+                }
+
+                if (found == null) {
+                    if (cursor != null) {
+                        cursor.close();
+                        cursor = null;
+                    }
+                    // Last resort: filename match. This still works if a vendor
+                    // reports a non-standard RELATIVE_PATH.
+                    cursor = resolver.query(
+                            collection,
+                            projection,
+                            MediaStore.MediaColumns.DISPLAY_NAME + "=?",
+                            new String[] { displayName },
+                            null);
+                    if (cursor != null && cursor.moveToFirst()) {
+                        long id = cursor.getLong(0);
+                        found = ContentUris.withAppendedId(collection, id);
+                    }
+                }
+            } catch (Exception ignored) {
+                // Try the next MediaStore volume/collection.
+            } finally {
+                if (cursor != null) {
+                    cursor.close();
+                }
+            }
+            if (found != null) {
+                break;
+            }
+        }
+
+        File target = new File(targetPath);
+
+        if (found != null) {
+            try {
+                if (copyStreamToPrivateFile(resolver.openInputStream(found), target)) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+                // Continue with direct Java file access below.
+            }
+        }
+
+        // Last fallback: Java FileInputStream. This follows Android's app
+        // storage permission model and is independent from Qt's QFile/native
+        // decoder path handling.
+        try {
+            if (copyStreamToPrivateFile(new FileInputStream(sourcePath), target)) {
+                return true;
+            }
+        } catch (Exception ignored) {
+            // Nothing else can resolve this path.
+        }
+
+        if (target.exists()) {
+            target.delete();
+        }
+        return false;
     }
 
     // ─── Keyboard handling optimization ─────────────────────────────────

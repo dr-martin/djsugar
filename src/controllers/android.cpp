@@ -5,8 +5,15 @@
 #include <qjnitypes.h>
 
 #include <QtJniTypes>
+#include <QByteArray>
+#include <QMetaObject>
+#include <QPointer>
+
 #include <atomic>
 #include <cstddef>
+#include <unordered_map>
+
+#include "controllers/midi/androidmidicontroller.h"
 
 namespace mixxx {
 namespace android {
@@ -16,6 +23,39 @@ std::vector<std::pair<QJniObject, bool>> s_grantingResult = {};
 QJniObject s_intent = {};
 QJniObject s_usbManager = {};
 std::atomic<bool> s_usbPermissionGranted{false};
+
+namespace {
+std::mutex s_midiControllerLock;
+std::unordered_map<int, QPointer<AndroidMidiController>> s_midiControllers;
+std::atomic<int> s_nextMidiControllerId{1};
+
+QPointer<AndroidMidiController> midiControllerForId(int controllerId) {
+    std::lock_guard<std::mutex> lock(s_midiControllerLock);
+    const auto it = s_midiControllers.find(controllerId);
+    if (it == s_midiControllers.end()) {
+        return {};
+    }
+    return it->second;
+}
+} // namespace
+
+int registerMidiController(AndroidMidiController* controller) {
+    if (!controller) {
+        return -1;
+    }
+    const int id = s_nextMidiControllerId.fetch_add(1);
+    std::lock_guard<std::mutex> lock(s_midiControllerLock);
+    s_midiControllers[id] = QPointer<AndroidMidiController>(controller);
+    return id;
+}
+
+void unregisterMidiController(int controllerId) {
+    if (controllerId < 0) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(s_midiControllerLock);
+    s_midiControllers.erase(controllerId);
+}
 
 const QJniObject& getIntent() {
     __android_log_print(ANDROID_LOG_VERBOSE, "mixxx", "about to get intent");
@@ -124,20 +164,48 @@ void usbDeviceAccessResult(JNIEnv*, jobject, jobject device, jboolean granted) {
 Q_DECLARE_JNI_NATIVE_METHOD(usbDeviceAccessResult)
 
 // Native callback from AndroidMidiHelper.midiReceive()
-static void midiReceive(JNIEnv*,
+static void midiReceive(JNIEnv* env,
         jobject,
         jint controllerId,
         jbyteArray data,
         jint offset,
         jint count,
         jlong timestamp) {
-    // Forward to the active AndroidMidiController
-    // TODO: implement controller lookup by ID
-    Q_UNUSED(controllerId);
-    Q_UNUSED(data);
-    Q_UNUSED(offset);
-    Q_UNUSED(count);
     Q_UNUSED(timestamp);
+
+    if (!env || !data || offset < 0 || count <= 0) {
+        return;
+    }
+
+    const jsize arrayLength = env->GetArrayLength(data);
+    if (offset > arrayLength || count > arrayLength - offset) {
+        return;
+    }
+
+    QByteArray bytes(count, '\0');
+    env->GetByteArrayRegion(data,
+            offset,
+            count,
+            reinterpret_cast<jbyte*>(bytes.data()));
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return;
+    }
+
+    const auto controller = mixxx::android::midiControllerForId(controllerId);
+    if (!controller) {
+        return;
+    }
+
+    // Android's MidiReceiver callback may run on a Binder/handler thread.
+    // Marshal processing to the controller's Qt thread and guard its lifetime.
+    QMetaObject::invokeMethod(controller.data(),
+            [controller, bytes = std::move(bytes)]() {
+                if (controller) {
+                    controller->receiveAndroidMidi(bytes);
+                }
+            },
+            Qt::QueuedConnection);
 }
 Q_DECLARE_JNI_NATIVE_METHOD(midiReceive)
 

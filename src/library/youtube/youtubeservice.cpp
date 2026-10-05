@@ -544,9 +544,19 @@ void collectInnerTubeVideos(const QJsonValue& node,
         const QJsonObject obj = node.toObject();
         const QJsonValue compact = obj.value(QStringLiteral("compactVideoRenderer"));
         const QJsonValue plain = obj.value(QStringLiteral("videoRenderer"));
+        const QJsonValue playlist =
+                obj.value(QStringLiteral("playlistVideoRenderer"));
+        const QJsonValue playlistPanel =
+                obj.value(QStringLiteral("playlistPanelVideoRenderer"));
         const QJsonObject video = compact.isObject()
                 ? compact.toObject()
-                : (plain.isObject() ? plain.toObject() : QJsonObject());
+                : (plain.isObject()
+                                  ? plain.toObject()
+                                  : (playlist.isObject()
+                                                    ? playlist.toObject()
+                                                    : (playlistPanel.isObject()
+                                                                      ? playlistPanel.toObject()
+                                                                      : QJsonObject())));
         if (!video.isEmpty()) {
             YouTubeVideoInfo info;
             info.id = video.value(QStringLiteral("videoId")).toString();
@@ -559,9 +569,21 @@ void collectInnerTubeVideos(const QJsonValue& node,
                         video.value(QStringLiteral("shortBylineText")).toObject());
             }
             info.uploader = uploader;
-            const int dur = parseTimestampToSeconds(innerTubeText(
+            int dur = parseTimestampToSeconds(innerTubeText(
                     video.value(QStringLiteral("lengthText")).toObject()));
-            // No lengthText -> live/upcoming/non-playable: skip it.
+            // Some playlist renderers expose a numeric lengthSeconds field
+            // instead of lengthText. Use it before deciding this is live.
+            if (dur < 0) {
+                bool ok = false;
+                const int lengthSeconds =
+                        video.value(QStringLiteral("lengthSeconds"))
+                                .toString()
+                                .toInt(&ok);
+                if (ok && lengthSeconds > 0) {
+                    dur = lengthSeconds;
+                }
+            }
+            // No usable duration -> live/upcoming/non-playable: skip it.
             info.isLive = dur < 0;
             info.durationSec = dur > 0 ? dur : 0;
             if (!info.isLive && isValidYouTubeVideoId(info.id) &&
@@ -889,19 +911,18 @@ void YouTubeService::searchVideos(const QString& query, int cap, int minResults)
             [this, query, cap](const QString& innerTubeError) {
                 const bool hasYtDlpFallback = !m_ytDlpPath.isEmpty();
 #if defined(Q_OS_ANDROID)
-                // On Android the community Piped instances are almost always
-                // dead, so cascading through all of them (5 instances × 3
-                // filters, ~10 s each) only adds ~100 s of stalling before
-                // search finally fails — the user-reported "clicking YouTube
-                // lags then shows nothing" symptom. InnerTube (ANDROID_VR →
-                // TVHTML5 → WEB) is the reliable search path on Android, so when
-                // it fails we go straight to the bundled/Termux yt-dlp if one is
-                // usable, otherwise surface the error immediately. The bundled
-                // ("android-bundled") runtime is download-only — it can't run a
-                // search — so it does not count here.
-                const bool canSearchViaYtDlp = hasYtDlpFallback &&
-                        (m_ytDlpPath != QStringLiteral("android-bundled"));
-                if (canSearchViaYtDlp) {
+                // Keep direct InnerTube as the fast path, but unlike the old
+                // Android build we can now use the bundled self-updating yt-dlp
+                // runtime for metadata searches too. This gives us a real
+                // fallback when YouTube changes InnerTube response shapes or
+                // temporarily blocks a client.
+                if (m_ytDlpPath == QStringLiteral("android-bundled")) {
+                    kLogger.warning()
+                            << "InnerTube search failed for" << query << ":"
+                            << innerTubeError
+                            << "— falling back to bundled yt-dlp search";
+                    searchViaAndroidBundled(query, cap);
+                } else if (hasYtDlpFallback) {
                     kLogger.warning()
                             << "InnerTube search failed for" << query << ":"
                             << innerTubeError << "— falling back to yt-dlp";
@@ -910,7 +931,7 @@ void YouTubeService::searchVideos(const QString& query, int cap, int minResults)
                     kLogger.warning()
                             << "InnerTube search failed for" << query << ":"
                             << innerTubeError
-                            << "— no usable fallback on Android, surfacing error";
+                            << "— no usable fallback on Android";
                     Q_EMIT searchFailed(query, innerTubeError);
                 }
 #else
@@ -980,12 +1001,20 @@ void YouTubeService::downloadVideo(const QString& videoId, const QString& cacheD
                 });
     }
 
-    // Primary: the YouTube InnerTube player API (same reliable, proxy-free path
-    // used for search). The Android client context returns plain (non-cipher)
-    // stream URLs valid for ~6 hours with no external dependencies. We only fall
-    // back to the (frequently-dead) Piped instances and then yt-dlp if every
-    // InnerTube client fails — this avoids the long stall the user hit while
-    // cycling through unreachable Piped hosts before each download.
+#if defined(Q_OS_ANDROID) && defined(HAVE_YTDLP_ANDROID)
+    // On Android use the maintained yt-dlp runtime as the primary downloader.
+    // YouTube now commonly requires PO tokens for direct media URLs; our
+    // hand-written InnerTube resolver deliberately does not implement that
+    // rapidly-changing challenge flow. yt-dlp does, and can update itself
+    // without rebuilding DJ Sugar.
+    kLogger.info() << "[Android] using bundled yt-dlp as primary downloader for"
+                   << videoId;
+    downloadViaAndroidBundled(videoId, cacheDir);
+    return;
+#endif
+
+    // Desktop primary: resolve through InnerTube first, then fall back to Piped
+    // and the standalone yt-dlp binary.
     downloadViaInnerTube(videoId,
             cacheDir,
             [this, videoId, cacheDir](const QString& innerTubeError) {
@@ -1023,6 +1052,41 @@ void YouTubeService::downloadVideo(const QString& videoId, const QString& cacheD
                             }
                         });
             });
+}
+
+void YouTubeService::searchSoundCloud(const QString& query, int cap) {
+    const QString trimmed = query.trimmed();
+    if (trimmed.isEmpty()) {
+        Q_EMIT soundCloudSearchFailed(query, tr("Empty SoundCloud search"));
+        return;
+    }
+    cap = qBound(1, cap, 50);
+#if defined(Q_OS_ANDROID) && defined(HAVE_YTDLP_ANDROID)
+    searchSoundCloudViaAndroidBundled(trimmed, cap);
+#else
+    searchSoundCloudViaYtDlp(trimmed, cap);
+#endif
+}
+
+void YouTubeService::downloadSoundCloud(
+        const QString& sourceUrl,
+        const QString& requestKey,
+        const QString& cacheDir,
+        const QString& title,
+        const QString& uploader) {
+    if (sourceUrl.trimmed().isEmpty() || requestKey.trimmed().isEmpty()) {
+        Q_EMIT soundCloudDownloadFailed(
+                requestKey, tr("Invalid SoundCloud track"));
+        return;
+    }
+    QDir().mkpath(cacheDir);
+#if defined(Q_OS_ANDROID) && defined(HAVE_YTDLP_ANDROID)
+    downloadSoundCloudViaAndroidBundled(
+            sourceUrl, requestKey, cacheDir, title, uploader);
+#else
+    downloadSoundCloudViaYtDlp(
+            sourceUrl, requestKey, cacheDir, title, uploader);
+#endif
 }
 
 void YouTubeService::fetchTrending(const QString& region, int cap, int minResults) {
@@ -1438,6 +1502,140 @@ void YouTubeService::searchViaInnerTube(const QString& emittedQuery,
                     return;
                 }
                 Q_EMIT searchResultsReady(emittedQuery, results);
+            });
+}
+
+
+void YouTubeService::fetchPlaylist(const QString& playlistUrl, int cap) {
+    const QString source = playlistUrl.trimmed();
+    const QUrl url = QUrl::fromUserInput(source);
+    const QUrlQuery query(url);
+    const QString playlistId = query.queryItemValue(QStringLiteral("list"));
+
+    m_searchContinuationToken.clear();
+
+    if (playlistId.isEmpty()) {
+        Q_EMIT searchFailed(source, tr("No YouTube playlist id found in this link"));
+        return;
+    }
+
+#if defined(Q_OS_ANDROID) && defined(HAVE_YTDLP_ANDROID)
+    if (m_ytDlpPath == QStringLiteral("android-bundled")) {
+        kLogger.info() << "[Android] importing playlist/Mix with bundled yt-dlp:"
+                       << playlistId;
+        fetchPlaylistViaAndroidBundled(source, cap);
+        return;
+    }
+#endif
+
+    const QVector<InnerTubeClient>& clients = innerTubeSearchClients();
+    if (clients.isEmpty()) {
+        Q_EMIT searchFailed(source, tr("No YouTube client is available"));
+        return;
+    }
+
+    // Playlist browse works most consistently with the WEB client. Keep the
+    // first configured client as a fallback if WEB is not present.
+    int clientIndex = 0;
+    for (int i = 0; i < clients.size(); ++i) {
+        if (QString::fromLatin1(clients.at(i).clientName) ==
+                QStringLiteral("WEB")) {
+            clientIndex = i;
+            break;
+        }
+    }
+    const InnerTubeClient& c = clients.at(clientIndex);
+
+    const bool isMix = playlistId.startsWith(QStringLiteral("RD"));
+    QUrl reqUrl(isMix
+                    ? QStringLiteral("https://www.youtube.com/youtubei/v1/next")
+                    : QStringLiteral("https://www.youtube.com/youtubei/v1/browse"));
+    if (c.apiKey[0] != '\0') {
+        QUrlQuery apiQuery;
+        apiQuery.addQueryItem(QStringLiteral("key"),
+                QString::fromLatin1(c.apiKey));
+        reqUrl.setQuery(apiQuery);
+    }
+
+    QJsonObject clientCtx = innerTubeClientContext(c);
+    if (!m_visitorData.isEmpty()) {
+        clientCtx.insert(QStringLiteral("visitorData"), m_visitorData);
+    }
+    QJsonObject context;
+    context.insert(QStringLiteral("client"), clientCtx);
+
+    QJsonObject body;
+    body.insert(QStringLiteral("context"), context);
+    if (isMix) {
+        body.insert(QStringLiteral("playlistId"), playlistId);
+        // RD playlists are generated from a seed video. The last 11
+        // characters are the seed for ordinary RD<videoId> links, including
+        // links produced by YouTube's "Mix" / play-next share action.
+        const QString seedId = playlistId.right(11);
+        if (isValidYouTubeVideoId(seedId)) {
+            body.insert(QStringLiteral("videoId"), seedId);
+        }
+    } else {
+        const QString browseId = QStringLiteral("VL") + playlistId;
+        body.insert(QStringLiteral("browseId"), browseId);
+    }
+
+    QNetworkRequest req(reqUrl);
+    req.setHeader(QNetworkRequest::ContentTypeHeader,
+            QStringLiteral("application/json"));
+    req.setRawHeader("User-Agent", QByteArray(c.userAgent));
+    req.setTransferTimeout(kSearchTimeoutMs);
+    applyYouTubeRequestAttributes(&req);
+    applyBrowserFingerprint(&req, c.clientNameId);
+
+    kLogger.info() << "Importing YouTube playlist" << playlistId
+                   << (isMix ? "(Mix)" : "(playlist)");
+
+    QNetworkReply* reply =
+            m_pNam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply,
+            &QNetworkReply::finished,
+            this,
+            [this, reply, source, cap, playlistId]() {
+                const int httpStatus =
+                        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
+                                .toInt();
+                const QByteArray rawBody = reply->readAll();
+                reply->deleteLater();
+
+                if (reply->error() != QNetworkReply::NoError) {
+                    Q_EMIT searchFailed(source,
+                            tr("YouTube playlist request failed: %1")
+                                    .arg(reply->errorString()));
+                    return;
+                }
+
+                const QJsonObject root =
+                        QJsonDocument::fromJson(rawBody).object();
+                if (detectBotFlagging(httpStatus, root, rawBody)) {
+                    Q_EMIT searchFailed(source,
+                            tr("YouTube asked for verification while importing the playlist"));
+                    return;
+                }
+
+                QList<YouTubeVideoInfo> results =
+                        parseInnerTubeSearch(root, qMax(1, cap));
+                if (results.isEmpty()) {
+                    Q_EMIT searchFailed(source,
+                            tr("No playable tracks were found in playlist %1")
+                                    .arg(playlistId));
+                    return;
+                }
+
+                // Playlist continuation uses a different endpoint/body than
+                // search continuation. Keep infinite-scroll disabled for this
+                // first implementation rather than accidentally issuing a
+                // search continuation request with the wrong protocol.
+                m_searchContinuationToken.clear();
+
+                kLogger.info() << "Imported" << results.size()
+                               << "tracks from YouTube playlist" << playlistId;
+                Q_EMIT searchResultsReady(source, results);
             });
 }
 
@@ -2735,6 +2933,156 @@ void YouTubeService::downloadViaYtDlp(const QString& videoId, const QString& cac
             });
 }
 
+void YouTubeService::searchSoundCloudViaYtDlp(
+        const QString& query, int cap) {
+    if (m_ytDlpPath.isEmpty()) {
+        Q_EMIT soundCloudSearchFailed(query, tr("yt-dlp not available"));
+        return;
+    }
+    QStringList args = {
+            QStringLiteral("--flat-playlist"),
+            QStringLiteral("--skip-download"),
+            QStringLiteral("--dump-single-json"),
+            QStringLiteral("--ignore-errors"),
+            QStringLiteral("--no-warnings"),
+            QStringLiteral("--no-cache-dir"),
+            QStringLiteral("--ignore-config"),
+            QStringLiteral("scsearch%1:%2").arg(cap).arg(query),
+    };
+    runYtDlp(
+            args,
+            kSearchTimeoutMs,
+            [this, query, cap](const QByteArray& stdoutBytes) {
+                const QJsonObject root =
+                        QJsonDocument::fromJson(stdoutBytes).object();
+                const QJsonArray entries =
+                        root.value(QStringLiteral("entries")).toArray();
+                QList<SoundCloudTrackInfo> results;
+                results.reserve(qMin(entries.size(), cap));
+                QSet<QString> seen;
+                for (const QJsonValue& value : entries) {
+                    if (results.size() >= cap) {
+                        break;
+                    }
+                    const QJsonObject entry = value.toObject();
+                    SoundCloudTrackInfo info;
+                    info.id = entry.value(QStringLiteral("id")).toString();
+                    info.title = entry.value(QStringLiteral("title")).toString();
+                    info.uploader =
+                            entry.value(QStringLiteral("uploader")).toString();
+                    info.url =
+                            entry.value(QStringLiteral("webpage_url")).toString();
+                    if (info.url.isEmpty()) {
+                        info.url = entry.value(QStringLiteral("url")).toString();
+                    }
+                    const QJsonValue duration =
+                            entry.value(QStringLiteral("duration"));
+                    if (duration.isDouble()) {
+                        info.durationSec =
+                                qMax(0, static_cast<int>(duration.toDouble()));
+                    }
+                    const QString uniqueKey =
+                            !info.id.isEmpty() ? info.id : info.url;
+                    if (!uniqueKey.isEmpty() && !info.title.isEmpty() &&
+                            !info.url.isEmpty() && !seen.contains(uniqueKey)) {
+                        seen.insert(uniqueKey);
+                        results.append(info);
+                    }
+                }
+                Q_EMIT soundCloudSearchResultsReady(query, results);
+            },
+            [this, query](const QString& error) {
+                Q_EMIT soundCloudSearchFailed(query, error);
+            });
+}
+
+void YouTubeService::downloadSoundCloudViaYtDlp(
+        const QString& sourceUrl,
+        const QString& requestKey,
+        const QString& cacheDir,
+        const QString& title,
+        const QString& uploader) {
+    if (m_ytDlpPath.isEmpty()) {
+        Q_EMIT soundCloudDownloadFailed(
+                requestKey, tr("yt-dlp not available"));
+        return;
+    }
+
+    const QString baseName =
+            QStringLiteral("sc_%1").arg(requestKey);
+    const QString outTemplate =
+            QDir(cacheDir).filePath(baseName + QStringLiteral(".%(ext)s"));
+    QStringList args = {
+            QStringLiteral("-f"),
+            QStringLiteral("bestaudio"),
+            QStringLiteral("--extract-audio"),
+            QStringLiteral("--audio-format"),
+            QStringLiteral("m4a"),
+            QStringLiteral("--no-playlist"),
+            QStringLiteral("--no-warnings"),
+            QStringLiteral("--no-progress"),
+            QStringLiteral("--no-cache-dir"),
+            QStringLiteral("--ignore-config"),
+            QStringLiteral("--no-mtime"),
+            QStringLiteral("-o"),
+            outTemplate,
+            QStringLiteral("--print"),
+            QStringLiteral("after_move:filepath"),
+            QStringLiteral("--"),
+            sourceUrl,
+    };
+    runYtDlp(
+            args,
+            kDownloadTimeoutMs,
+            [this,
+                    requestKey,
+                    cacheDir,
+                    baseName,
+                    title,
+                    uploader,
+                    sourceUrl](const QByteArray& stdoutBytes) {
+                QString outPath;
+                const QList<QByteArray> lines = stdoutBytes.split('\n');
+                for (auto it = lines.crbegin(); it != lines.crend(); ++it) {
+                    const QString line =
+                            QString::fromLocal8Bit(*it).trimmed();
+                    if (!line.isEmpty() && QFileInfo::exists(line)) {
+                        outPath = line;
+                        break;
+                    }
+                }
+                if (outPath.isEmpty()) {
+                    const QDir dir(cacheDir);
+                    const QStringList existing = dir.entryList(
+                            {baseName + QStringLiteral(".*")},
+                            QDir::Files | QDir::NoDotAndDotDot);
+                    for (const QString& fileName : existing) {
+                        if (fileName.endsWith(QStringLiteral(".part")) ||
+                                fileName.endsWith(QStringLiteral(".json"))) {
+                            continue;
+                        }
+                        outPath = dir.filePath(fileName);
+                        break;
+                    }
+                }
+                if (outPath.isEmpty()) {
+                    Q_EMIT soundCloudDownloadFailed(
+                            requestKey,
+                            tr("SoundCloud download finished but no audio file was found"));
+                    return;
+                }
+                Q_EMIT soundCloudDownloadFinished(
+                        requestKey,
+                        outPath,
+                        title,
+                        uploader,
+                        sourceUrl);
+            },
+            [this, requestKey](const QString& error) {
+                Q_EMIT soundCloudDownloadFailed(requestKey, error);
+            });
+}
+
 #if defined(Q_OS_ANDROID) && defined(HAVE_YTDLP_ANDROID)
 // =============================================================================
 // Bundled youtubedl-android (JNI-based, no external dependencies)
@@ -2746,6 +3094,186 @@ void YouTubeService::downloadViaYtDlp(const QString& videoId, const QString& cac
 namespace {
 std::atomic<bool> s_ytdlpUpdateAttempted{false};
 } // namespace
+
+
+QList<YouTubeVideoInfo> parseBundledYtDlpEntries(
+        const QString& jsonText, int cap) {
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonText.toUtf8());
+    if (!doc.isObject()) {
+        return {};
+    }
+    const QJsonArray entries =
+            doc.object().value(QStringLiteral("entries")).toArray();
+    QList<YouTubeVideoInfo> results;
+    results.reserve(qMin(entries.size(), cap));
+    QSet<QString> seen;
+    for (const QJsonValue& value : entries) {
+        if (results.size() >= cap) {
+            break;
+        }
+        const QJsonObject entry = value.toObject();
+        YouTubeVideoInfo info;
+        info.id = entry.value(QStringLiteral("id")).toString();
+        info.title = entry.value(QStringLiteral("title")).toString();
+        info.uploader = entry.value(QStringLiteral("channel")).toString();
+        if (info.uploader.isEmpty()) {
+            info.uploader = entry.value(QStringLiteral("uploader")).toString();
+        }
+        const QJsonValue duration = entry.value(QStringLiteral("duration"));
+        if (duration.isDouble()) {
+            info.durationSec = qMax(0, static_cast<int>(duration.toDouble()));
+        }
+        info.isLive = isYtDlpLiveStream(entry);
+        if (!info.isLive && isValidYouTubeVideoId(info.id) &&
+                !info.title.isEmpty() && !seen.contains(info.id)) {
+            seen.insert(info.id);
+            results.append(info);
+        }
+    }
+    return results;
+}
+
+void YouTubeService::searchViaAndroidBundled(const QString& query, int cap) {
+    const QString source =
+            QStringLiteral("ytsearch%1:%2").arg(qMax(1, cap)).arg(query);
+    fetchFlatViaAndroidBundled(source, query, cap);
+}
+
+void YouTubeService::fetchPlaylistViaAndroidBundled(
+        const QString& source, int cap) {
+    fetchFlatViaAndroidBundled(source, source, cap);
+}
+
+void YouTubeService::fetchFlatViaAndroidBundled(
+        const QString& source, const QString& emittedQuery, int cap) {
+    QPointer<YouTubeService> guard(this);
+    QThread* thread = QThread::create([guard, source, emittedQuery, cap]() {
+        auto fail = [guard, emittedQuery](const QString& message) {
+            if (!guard) {
+                return;
+            }
+            QMetaObject::invokeMethod(
+                    guard,
+                    [guard, emittedQuery, message]() {
+                        if (guard) {
+                            Q_EMIT guard->searchFailed(emittedQuery, message);
+                        }
+                    },
+                    Qt::QueuedConnection);
+        };
+
+        QJniObject context = QNativeInterface::QAndroidApplication::context();
+        if (!context.isValid()) {
+            fail(QStringLiteral("No Android context for bundled yt-dlp"));
+            return;
+        }
+
+        QJniObject ytdl = QJniObject::callStaticObjectMethod(
+                "com/yausername/youtubedl_android/YoutubeDL",
+                "getInstance",
+                "()Lcom/yausername/youtubedl_android/YoutubeDL;");
+        if (!ytdl.isValid()) {
+            fail(QStringLiteral("Bundled yt-dlp is not available"));
+            return;
+        }
+
+        QJniEnvironment env;
+        ytdl.callMethod<void>(
+                "init", "(Landroid/content/Context;)V", context.object());
+        if (env.checkAndClearExceptions()) {
+            fail(QStringLiteral("Bundled yt-dlp initialization failed"));
+            return;
+        }
+
+        // Keep one self-update attempt shared with the downloader. A current
+        // yt-dlp extractor is essential because YouTube changes frequently.
+        if (!s_ytdlpUpdateAttempted.exchange(true)) {
+            QJniObject channel = QJniObject::getStaticObjectField(
+                    "com/yausername/youtubedl_android/YoutubeDL$UpdateChannel$STABLE",
+                    "INSTANCE",
+                    "Lcom/yausername/youtubedl_android/YoutubeDL$UpdateChannel$STABLE;");
+            if (channel.isValid()) {
+                ytdl.callObjectMethod(
+                        "updateYoutubeDL",
+                        "(Landroid/content/Context;"
+                        "Lcom/yausername/youtubedl_android/YoutubeDL$UpdateChannel;)"
+                        "Lcom/yausername/youtubedl_android/YoutubeDL$UpdateStatus;",
+                        context.object(),
+                        channel.object());
+            }
+            env.checkAndClearExceptions();
+        }
+
+        QJniObject request(
+                "com/yausername/youtubedl_android/YoutubeDLRequest",
+                "(Ljava/lang/String;)V",
+                QJniObject::fromString(source).object());
+        const char* requestClass =
+                "(Ljava/lang/String;)Lcom/yausername/youtubedl_android/"
+                "YoutubeDLRequest;";
+        const char* requestPairClass =
+                "(Ljava/lang/String;Ljava/lang/String;)"
+                "Lcom/yausername/youtubedl_android/YoutubeDLRequest;";
+
+        for (const QString& option : {
+                     QStringLiteral("--flat-playlist"),
+                     QStringLiteral("--skip-download"),
+                     QStringLiteral("--dump-single-json"),
+                     QStringLiteral("--ignore-errors"),
+                     QStringLiteral("--no-warnings"),
+                     QStringLiteral("--no-cache-dir"),
+                     QStringLiteral("--ignore-config")}) {
+            request.callMethod<QJniObject>(
+                    "addOption",
+                    requestClass,
+                    QJniObject::fromString(option).object());
+        }
+        request.callMethod<QJniObject>(
+                "addOption",
+                requestPairClass,
+                QJniObject::fromString("--playlist-end").object(),
+                QJniObject::fromString(QString::number(qMax(1, cap))).object());
+
+        QJniObject response = ytdl.callObjectMethod(
+                "execute",
+                "(Lcom/yausername/youtubedl_android/YoutubeDLRequest;)"
+                "Lcom/yausername/youtubedl_android/YoutubeDLResponse;",
+                request.object());
+        if (env.checkAndClearExceptions() || !response.isValid()) {
+            fail(QStringLiteral("Bundled yt-dlp could not read YouTube results"));
+            return;
+        }
+
+        QJniObject out = response.callObjectMethod(
+                "getOut", "()Ljava/lang/String;");
+        if (env.checkAndClearExceptions() || !out.isValid()) {
+            fail(QStringLiteral("Bundled yt-dlp returned no metadata"));
+            return;
+        }
+
+        const QList<YouTubeVideoInfo> results =
+                parseBundledYtDlpEntries(out.toString(), qMax(1, cap));
+        if (results.isEmpty()) {
+            fail(QStringLiteral("No playable YouTube tracks were found"));
+            return;
+        }
+
+        if (!guard) {
+            return;
+        }
+        QMetaObject::invokeMethod(
+                guard,
+                [guard, emittedQuery, results]() {
+                    if (guard) {
+                        Q_EMIT guard->searchResultsReady(emittedQuery, results);
+                    }
+                },
+                Qt::QueuedConnection);
+    });
+    thread->setParent(this);
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
 
 void YouTubeService::downloadViaAndroidBundled(
         const QString& videoId, const QString& cacheDir) {
@@ -2799,6 +3327,40 @@ void YouTubeService::downloadViaAndroidBundled(
             return;
         }
 
+        // Audio extraction below uses yt-dlp's FFmpeg post-processor.
+        // youtubedl-android ships FFmpeg as a separate AAR/runtime and requires
+        // FFmpeg.getInstance().init(context) before any --extract-audio request.
+        // Search/metadata does not need FFmpeg, which is why YouTube result lists
+        // could work while every attempt to actually load audio failed.
+        QJniObject ffmpeg = QJniObject::callStaticObjectMethod(
+                "com/yausername/ffmpeg/FFmpeg",
+                "getInstance",
+                "()Lcom/yausername/ffmpeg/FFmpeg;");
+        if (!ffmpeg.isValid()) {
+            kLogger.warning() << "[Android] downloadViaAndroidBundled:"
+                              << "FFmpeg.getInstance() returned invalid for"
+                              << videoId;
+            if (guard) {
+                Q_EMIT guard->downloadFailed(
+                        videoId, "Bundled FFmpeg runtime is not available");
+            }
+            return;
+        }
+        ffmpeg.callMethod<void>(
+                "init",
+                "(Landroid/content/Context;)V",
+                context.object());
+        if (env.checkAndClearExceptions()) {
+            kLogger.warning() << "[Android] downloadViaAndroidBundled:"
+                              << "FFmpeg.init() threw exception for"
+                              << videoId;
+            if (guard) {
+                Q_EMIT guard->downloadFailed(
+                        videoId, "Bundled FFmpeg initialization failed");
+            }
+            return;
+        }
+
         // The yt-dlp packaged inside the AAR is whatever version was bundled at
         // the library's build time and goes stale quickly — YouTube regularly
         // breaks older extractors, which is the usual reason downloads stop
@@ -2838,7 +3400,18 @@ void YouTubeService::downloadViaAndroidBundled(
                 "(Ljava/lang/String;Ljava/lang/String;)Lcom/yausername/youtubedl_android/"
                 "YoutubeDLRequest;",
                 QJniObject::fromString("-f").object(),
-                QJniObject::fromString("bestaudio").object());
+                QJniObject::fromString("bestaudio[ext=m4a]/bestaudio").object());
+        // Android's current Mixxx/FFmpeg packaging cannot reliably open
+        // WebM/Opus tracks from the cache. Force yt-dlp/FFmpeg to hand us an
+        // M4A/AAC file that the deck decoder supports consistently.
+        request.callMethod<QJniObject>("addOption",
+                "(Ljava/lang/String;)Lcom/yausername/youtubedl_android/YoutubeDLRequest;",
+                QJniObject::fromString("--extract-audio").object());
+        request.callMethod<QJniObject>("addOption",
+                "(Ljava/lang/String;Ljava/lang/String;)Lcom/yausername/youtubedl_android/"
+                "YoutubeDLRequest;",
+                QJniObject::fromString("--audio-format").object(),
+                QJniObject::fromString("m4a").object());
         request.callMethod<QJniObject>("addOption",
                 "(Ljava/lang/String;Ljava/lang/String;)Lcom/yausername/youtubedl_android/"
                 "YoutubeDLRequest;",
@@ -2930,6 +3503,311 @@ void YouTubeService::downloadViaAndroidBundled(
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);
     thread->start();
 }
+void YouTubeService::searchSoundCloudViaAndroidBundled(
+        const QString& query, int cap) {
+    QPointer<YouTubeService> guard(this);
+    QThread* thread = QThread::create([guard, query, cap]() {
+        auto fail = [guard, query](const QString& message) {
+            if (!guard) {
+                return;
+            }
+            QMetaObject::invokeMethod(
+                    guard,
+                    [guard, query, message]() {
+                        if (guard) {
+                            Q_EMIT guard->soundCloudSearchFailed(query, message);
+                        }
+                    },
+                    Qt::QueuedConnection);
+        };
+
+        QJniObject context = QNativeInterface::QAndroidApplication::context();
+        if (!context.isValid()) {
+            fail(QStringLiteral("No Android context for SoundCloud search"));
+            return;
+        }
+        QJniObject ytdl = QJniObject::callStaticObjectMethod(
+                "com/yausername/youtubedl_android/YoutubeDL",
+                "getInstance",
+                "()Lcom/yausername/youtubedl_android/YoutubeDL;");
+        if (!ytdl.isValid()) {
+            fail(QStringLiteral("Bundled yt-dlp is not available"));
+            return;
+        }
+        QJniEnvironment env;
+        ytdl.callMethod<void>(
+                "init", "(Landroid/content/Context;)V", context.object());
+        if (env.checkAndClearExceptions()) {
+            fail(QStringLiteral("Bundled yt-dlp initialization failed"));
+            return;
+        }
+
+        const QString source =
+                QStringLiteral("scsearch%1:%2").arg(qMax(1, cap)).arg(query);
+        QJniObject request(
+                "com/yausername/youtubedl_android/YoutubeDLRequest",
+                "(Ljava/lang/String;)V",
+                QJniObject::fromString(source).object());
+        const char* requestClass =
+                "(Ljava/lang/String;)Lcom/yausername/youtubedl_android/"
+                "YoutubeDLRequest;";
+        const char* requestPairClass =
+                "(Ljava/lang/String;Ljava/lang/String;)"
+                "Lcom/yausername/youtubedl_android/YoutubeDLRequest;";
+
+        for (const QString& option : {
+                     QStringLiteral("--flat-playlist"),
+                     QStringLiteral("--skip-download"),
+                     QStringLiteral("--dump-single-json"),
+                     QStringLiteral("--ignore-errors"),
+                     QStringLiteral("--no-warnings"),
+                     QStringLiteral("--no-cache-dir"),
+                     QStringLiteral("--ignore-config")}) {
+            request.callMethod<QJniObject>(
+                    "addOption",
+                    requestClass,
+                    QJniObject::fromString(option).object());
+        }
+        request.callMethod<QJniObject>(
+                "addOption",
+                requestPairClass,
+                QJniObject::fromString("--playlist-end").object(),
+                QJniObject::fromString(QString::number(qMax(1, cap))).object());
+
+        QJniObject response = ytdl.callObjectMethod(
+                "execute",
+                "(Lcom/yausername/youtubedl_android/YoutubeDLRequest;)"
+                "Lcom/yausername/youtubedl_android/YoutubeDLResponse;",
+                request.object());
+        if (env.checkAndClearExceptions() || !response.isValid()) {
+            fail(QStringLiteral("SoundCloud search failed"));
+            return;
+        }
+        QJniObject out =
+                response.callObjectMethod("getOut", "()Ljava/lang/String;");
+        if (env.checkAndClearExceptions() || !out.isValid()) {
+            fail(QStringLiteral("SoundCloud returned no metadata"));
+            return;
+        }
+
+        const QJsonObject root =
+                QJsonDocument::fromJson(out.toString().toUtf8()).object();
+        const QJsonArray entries =
+                root.value(QStringLiteral("entries")).toArray();
+        QList<SoundCloudTrackInfo> results;
+        results.reserve(qMin(entries.size(), cap));
+        QSet<QString> seen;
+        for (const QJsonValue& value : entries) {
+            if (results.size() >= cap) {
+                break;
+            }
+            const QJsonObject entry = value.toObject();
+            SoundCloudTrackInfo info;
+            info.id = entry.value(QStringLiteral("id")).toString();
+            info.title = entry.value(QStringLiteral("title")).toString();
+            info.uploader =
+                    entry.value(QStringLiteral("uploader")).toString();
+            info.url =
+                    entry.value(QStringLiteral("webpage_url")).toString();
+            if (info.url.isEmpty()) {
+                info.url = entry.value(QStringLiteral("url")).toString();
+            }
+            const QJsonValue duration =
+                    entry.value(QStringLiteral("duration"));
+            if (duration.isDouble()) {
+                info.durationSec =
+                        qMax(0, static_cast<int>(duration.toDouble()));
+            }
+            const QString uniqueKey =
+                    !info.id.isEmpty() ? info.id : info.url;
+            if (!uniqueKey.isEmpty() && !info.title.isEmpty() &&
+                    !info.url.isEmpty() && !seen.contains(uniqueKey)) {
+                seen.insert(uniqueKey);
+                results.append(info);
+            }
+        }
+        if (results.isEmpty()) {
+            fail(QStringLiteral("No playable SoundCloud tracks were found"));
+            return;
+        }
+
+        QMetaObject::invokeMethod(
+                guard,
+                [guard, query, results]() {
+                    if (guard) {
+                        Q_EMIT guard->soundCloudSearchResultsReady(
+                                query, results);
+                    }
+                },
+                Qt::QueuedConnection);
+    });
+    thread->setParent(this);
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+void YouTubeService::downloadSoundCloudViaAndroidBundled(
+        const QString& sourceUrl,
+        const QString& requestKey,
+        const QString& cacheDir,
+        const QString& title,
+        const QString& uploader) {
+    QPointer<YouTubeService> guard(this);
+    QThread* thread = QThread::create(
+            [guard, sourceUrl, requestKey, cacheDir, title, uploader]() {
+                auto fail = [guard, requestKey](const QString& message) {
+                    if (!guard) {
+                        return;
+                    }
+                    QMetaObject::invokeMethod(
+                            guard,
+                            [guard, requestKey, message]() {
+                                if (guard) {
+                                    Q_EMIT guard->soundCloudDownloadFailed(
+                                            requestKey, message);
+                                }
+                            },
+                            Qt::QueuedConnection);
+                };
+
+                QJniObject context =
+                        QNativeInterface::QAndroidApplication::context();
+                if (!context.isValid()) {
+                    fail(QStringLiteral("No Android context for SoundCloud"));
+                    return;
+                }
+                QJniObject ytdl = QJniObject::callStaticObjectMethod(
+                        "com/yausername/youtubedl_android/YoutubeDL",
+                        "getInstance",
+                        "()Lcom/yausername/youtubedl_android/YoutubeDL;");
+                if (!ytdl.isValid()) {
+                    fail(QStringLiteral("Bundled yt-dlp is not available"));
+                    return;
+                }
+                QJniEnvironment env;
+                ytdl.callMethod<void>(
+                        "init",
+                        "(Landroid/content/Context;)V",
+                        context.object());
+                if (env.checkAndClearExceptions()) {
+                    fail(QStringLiteral("Bundled yt-dlp initialization failed"));
+                    return;
+                }
+
+                QJniObject ffmpeg = QJniObject::callStaticObjectMethod(
+                        "com/yausername/ffmpeg/FFmpeg",
+                        "getInstance",
+                        "()Lcom/yausername/ffmpeg/FFmpeg;");
+                if (!ffmpeg.isValid()) {
+                    fail(QStringLiteral("Bundled FFmpeg runtime is not available"));
+                    return;
+                }
+                ffmpeg.callMethod<void>(
+                        "init",
+                        "(Landroid/content/Context;)V",
+                        context.object());
+                if (env.checkAndClearExceptions()) {
+                    fail(QStringLiteral("Bundled FFmpeg initialization failed"));
+                    return;
+                }
+
+                const QString baseName =
+                        QStringLiteral("sc_%1").arg(requestKey);
+                const QString outputTemplate =
+                        QDir(cacheDir).filePath(
+                                baseName + QStringLiteral(".%(ext)s"));
+                QJniObject request(
+                        "com/yausername/youtubedl_android/YoutubeDLRequest",
+                        "(Ljava/lang/String;)V",
+                        QJniObject::fromString(sourceUrl).object());
+                const char* requestClass =
+                        "(Ljava/lang/String;)"
+                        "Lcom/yausername/youtubedl_android/YoutubeDLRequest;";
+                const char* requestPairClass =
+                        "(Ljava/lang/String;Ljava/lang/String;)"
+                        "Lcom/yausername/youtubedl_android/YoutubeDLRequest;";
+
+                request.callMethod<QJniObject>(
+                        "addOption",
+                        requestPairClass,
+                        QJniObject::fromString("-f").object(),
+                        QJniObject::fromString("bestaudio").object());
+                for (const QString& option : {
+                             QStringLiteral("--extract-audio"),
+                             QStringLiteral("--no-playlist"),
+                             QStringLiteral("--no-warnings"),
+                             QStringLiteral("--no-cache-dir"),
+                             QStringLiteral("--ignore-config"),
+                             QStringLiteral("--no-mtime")}) {
+                    request.callMethod<QJniObject>(
+                            "addOption",
+                            requestClass,
+                            QJniObject::fromString(option).object());
+                }
+                request.callMethod<QJniObject>(
+                        "addOption",
+                        requestPairClass,
+                        QJniObject::fromString("--audio-format").object(),
+                        QJniObject::fromString("m4a").object());
+                request.callMethod<QJniObject>(
+                        "addOption",
+                        requestPairClass,
+                        QJniObject::fromString("-o").object(),
+                        QJniObject::fromString(outputTemplate).object());
+
+                QJniObject response = ytdl.callObjectMethod(
+                        "execute",
+                        "(Lcom/yausername/youtubedl_android/YoutubeDLRequest;)"
+                        "Lcom/yausername/youtubedl_android/YoutubeDLResponse;",
+                        request.object());
+                if (env.checkAndClearExceptions() || !response.isValid()) {
+                    fail(QStringLiteral("SoundCloud download failed"));
+                    return;
+                }
+
+                QString outputPath;
+                const QFileInfoList matches = QDir(cacheDir).entryInfoList(
+                        {baseName + QStringLiteral(".*")}, QDir::Files);
+                for (const QFileInfo& fi : matches) {
+                    const QString suffix = fi.suffix().toLower();
+                    if (suffix == QStringLiteral("part") ||
+                            suffix == QStringLiteral("ytdl") ||
+                            suffix == QStringLiteral("json")) {
+                        continue;
+                    }
+                    outputPath = fi.absoluteFilePath();
+                    break;
+                }
+                if (outputPath.isEmpty() || !QFileInfo::exists(outputPath)) {
+                    fail(QStringLiteral(
+                            "SoundCloud download finished but no audio file was found"));
+                    return;
+                }
+
+                QMetaObject::invokeMethod(
+                        guard,
+                        [guard,
+                                requestKey,
+                                outputPath,
+                                title,
+                                uploader,
+                                sourceUrl]() {
+                            if (guard) {
+                                Q_EMIT guard->soundCloudDownloadFinished(
+                                        requestKey,
+                                        outputPath,
+                                        title,
+                                        uploader,
+                                        sourceUrl);
+                            }
+                        },
+                        Qt::QueuedConnection);
+            });
+    thread->setParent(this);
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
 #endif // Q_OS_ANDROID && HAVE_YTDLP_ANDROID
 
 // =============================================================================

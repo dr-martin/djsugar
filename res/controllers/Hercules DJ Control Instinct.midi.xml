@@ -169,10 +169,10 @@
                 <status>0x80</status>
                 <midino>0x15</midino>
                 <group>[Channel1]</group>
-                <key>cue_default</key>
-                <description></description>
+                <key>HCInstinct.cueSet</key>
+                <description>DJ Sugar precise CUE at current jog position</description>
                 <options>
-                    <normal/>
+                    <script-binding/>
                 </options>
             </control>
             <control>
@@ -563,10 +563,10 @@
                 <status>0x80</status>
                 <midino>0x2f</midino>
                 <group>[Channel2]</group>
-                <key>cue_default</key>
-                <description></description>
+                <key>HCInstinct.cueSet</key>
+                <description>DJ Sugar precise CUE at current jog position</description>
                 <options>
-                    <normal/>
+                    <script-binding/>
                 </options>
             </control>
             <control>
@@ -713,10 +713,10 @@
                 <status>0x90</status>
                 <midino>0x15</midino>
                 <group>[Channel1]</group>
-                <key>cue_default</key>
-                <description></description>
+                <key>HCInstinct.cueSet</key>
+                <description>DJ Sugar precise CUE at current jog position</description>
                 <options>
-                    <normal/>
+                    <script-binding/>
                 </options>
             </control>
             <control>
@@ -923,10 +923,10 @@
                 <status>0x90</status>
                 <midino>0x2f</midino>
                 <group>[Channel2]</group>
-                <key>cue_default</key>
-                <description></description>
+                <key>HCInstinct.cueSet</key>
+                <description>DJ Sugar precise CUE at current jog position</description>
                 <options>
-                    <normal/>
+                    <script-binding/>
                 </options>
             </control>
             <control>

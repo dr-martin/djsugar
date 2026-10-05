@@ -421,6 +421,14 @@ bool WaveformWidgetFactory::setConfig(UserSettingsPointer config) {
 
     WaveformWidgetType::Type type = static_cast<WaveformWidgetType::Type>(
             m_config->getValueString(kWaveformTypeKey).toInt(&ok));
+#ifdef Q_OS_ANDROID
+    // DJ Sugar uses two overlapping waveform viewers. QOpenGLWindow-based
+    // waveform widgets cannot be reliably stacked on Android because each
+    // viewer owns a native child window. Force the QWidget/QPainter filtered
+    // renderer so both deck waveforms can be composited in one shared view.
+    type = WaveformWidgetType::Simple;
+    ok = true;
+#endif
     // Store the widget type on m_configType for later initialization.
     // We will initialize the objects later because of a problem with GL on QT 5.14.2 on Windows
     if (!ok || !setWidgetType(type, &m_configType)) {
@@ -1131,6 +1139,11 @@ WaveformWidgetAbstract* WaveformWidgetFactory::createAllshaderWaveformWidget(
 
 WaveformWidgetAbstract* WaveformWidgetFactory::createFilteredWaveformWidget(
         WWaveformViewer* viewer, WaveformRendererSignalBase::Options options) {
+#ifdef Q_OS_ANDROID
+    // Keep this a regular QWidget on Android. This is required for the DJ Sugar
+    // shared red/green waveform where two viewers occupy the same geometry.
+    return new SoftwareWaveformWidget(viewer->getGroup(), viewer, options);
+#else
     WaveformWidgetBackend backend = getBackendFromConfig();
 
     switch (backend) {
@@ -1142,6 +1155,7 @@ WaveformWidgetAbstract* WaveformWidgetFactory::createFilteredWaveformWidget(
     default:
         return new SoftwareWaveformWidget(viewer->getGroup(), viewer, options);
     }
+#endif
 }
 
 WaveformWidgetAbstract* WaveformWidgetFactory::createHSVWaveformWidget(

@@ -1380,6 +1380,20 @@ TrackPointer TrackDAO::getTrackById(TrackId trackId) const {
 
     // The GlobalTrackCache is only locked while executing the following line.
     TrackPointer pTrack = GlobalTrackCacheLocker().lookupTrackById(trackId);
+#ifdef Q_OS_ANDROID
+    // Old Android scans could leave a cached Track object with a valid id but
+    // no usable file location. Returning that object here bypasses the database
+    // lookup below and results in the persistent error:
+    // "The file \"\" could not be loaded." Drop only those broken cached
+    // objects so this call can reconstruct the track from track_locations.
+    if (pTrack && pTrack->getLocation().trimmed().isEmpty()) {
+        kLogger.warning()
+                << "Dropping Android cached track with empty location for id"
+                << trackId;
+        GlobalTrackCacheLocker().purgeTrackId(trackId);
+        pTrack.reset();
+    }
+#endif
     if (pTrack) {
         return pTrack;
     }
@@ -1491,7 +1505,13 @@ TrackPointer TrackDAO::getTrackById(TrackId trackId) const {
     { // Locking scope of cacheResolver
         // Location is the first column.
         DEBUG_ASSERT(queryRecord.count() > 0);
-        const auto trackLocation = queryRecord.value(0).toString();
+        const auto trackLocation = queryRecord.value(0).toString().trimmed();
+        if (trackLocation.isEmpty()) {
+            kLogger.warning()
+                    << "Refusing to construct track with empty file location for id"
+                    << trackId;
+            return nullptr;
+        }
         const auto fileInfo = mixxx::FileInfo(trackLocation);
         const auto fileAccess = mixxx::FileAccess(fileInfo);
         // Look up the track. First by trackId again, then find duplicates using the

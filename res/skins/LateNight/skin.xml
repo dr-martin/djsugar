@@ -39,14 +39,15 @@
     <!-- Set skin defaults -->
       <attribute config_key="[App],num_decks">4</attribute>
       <attribute config_key="[App],num_samplers">16</attribute>
-      <attribute persist="true" config_key="[Skin],show_waveforms">0</attribute>
+      <attribute persist="false" config_key="[Skin],show_waveforms">1</attribute>
+      <attribute persist="false" config_key="[Skin],show_settings">0</attribute>
       <attribute persist="true" config_key="[Skin],timing_shift_buttons">0</attribute>
 
     <!-- Decks -->
       <!-- general -->
-      <attribute persist="true" config_key="[Skin],show_4decks">0</attribute>
-      <attribute persist="true" config_key="[Skin],show_hotcues">1</attribute>
-      <attribute persist="true" config_key="[Skin],show_8_hotcues">1</attribute>
+      <attribute persist="false" config_key="[Skin],show_4decks">0</attribute>
+      <attribute persist="false" config_key="[Skin],show_hotcues">0</attribute>
+      <attribute persist="false" config_key="[Skin],show_8_hotcues">0</attribute>
       <attribute persist="true" config_key="[Skin],show_intro_outro_cues">1</attribute>
       <attribute persist="true" config_key="[Skin],show_loop_controls">1</attribute>
       <attribute persist="true" config_key="[Skin],show_beatjump_controls">1</attribute>
@@ -80,21 +81,21 @@
       <attribute persist="true" config_key="[Skin],show_xfader">1</attribute>
       <attribute persist="true" config_key="[LateNight],show_vumeters_compact">1</attribute>
     <!-- Effects -->
-      <attribute persist="true" config_key="[Skin],show_effectrack">0</attribute>
+      <attribute persist="false" config_key="[Skin],show_effectrack">0</attribute>
       <attribute persist="true" config_key="[Skin],show_4effectunits">0</attribute>
       <attribute persist="true" config_key="[Skin],show_superknobs">0</attribute>
     <!-- Samplers -->
-      <attribute persist="true" config_key="[Skin],show_samplers">0</attribute>
+      <attribute persist="false" config_key="[Skin],show_samplers">0</attribute>
       <attribute persist="true" config_key="[LateNight],sampler_rows">1</attribute>
       <attribute persist="true" config_key="[LateNight],expand_samplers_1-4">0</attribute>
       <attribute persist="true" config_key="[LateNight],expand_samplers_1-8">0</attribute>
       <attribute persist="true" config_key="[LateNight],expand_samplers_9-16">0</attribute>
     <!-- Mic / Aux -->
-      <attribute persist="true" config_key="[Skin],show_microphones">0</attribute>
+      <attribute persist="false" config_key="[Skin],show_microphones">0</attribute>
     <!-- Library -->
       <attribute config_key="[Skin],show_maximized_library">0</attribute>
       <attribute persist="true" config_key="[LateNight],max_lib_show_decks">1</attribute>
-      <attribute persist="true" config_key="[Skin],show_preview_decks">0</attribute>
+      <attribute persist="false" config_key="[Skin],show_preview_decks">0</attribute>
       <attribute persist="true" config_key="[Skin],show_library_coverart">1</attribute>
 
     <!-- Disable hidden effect routing Buttons -->
@@ -174,11 +175,11 @@
       <!-- Waveform & Overview colors -->
       <!-- This is a hack to have a grey background in empty decks.
           When a track is loaded the bg gets darker for better contrast -->
-      <SetVariable name="BgColorOverview_12">#19191a</SetVariable>
-      <SetVariable name="BgColorOverview_34">#001b23</SetVariable>
+      <SetVariable name="BgColorOverview_12">#d8dde2</SetVariable>
+      <SetVariable name="BgColorOverview_34">#d8dde2</SetVariable>
       <SetVariable name="BgColorOverview_SamPre">rgba(15, 15, 15, 20)</SetVariable>
-      <SetVariable name="BgColorWaveform_12">#0f0f0e</SetVariable>
-      <SetVariable name="BgColorWaveform_34">#001b23</SetVariable>
+      <SetVariable name="BgColorWaveform_12">#e4e7eb</SetVariable>
+      <SetVariable name="BgColorWaveform_34">#e4e7eb</SetVariable>
       <SetVariable name="SignalColor_12">#d9b28c</SetVariable>
       <SetVariable name="SignalColor_34">#7bc6c3</SetVariable>
 
@@ -196,8 +197,8 @@
            '1' cuts off the colored overlap. -->
       <SetVariable name="DndRectMarginHotcueBtn">1</SetVariable>
 
-      <SetVariable name="AxesColor">#999</SetVariable>
-      <SetVariable name="BeatColor">#999</SetVariable>
+      <SetVariable name="AxesColor">#555b61</SetVariable>
+      <SetVariable name="BeatColor">#555b61</SetVariable>
       <SetVariable name="PlayPosColor">#00c6ff</SetVariable>
       <SetVariable name="CueColor">#ff7a01</SetVariable>
       <SetVariable name="LoopColor">#00b400</SetVariable>
@@ -320,19 +321,19 @@
       <SetVariable name="EqKillDotSize">0f,0f</SetVariable>
 
       <!-- Waveform & Overview colors -->
-      <SetVariable name="BgColorOverview_12">rgba(15, 15, 15, 20)</SetVariable>
-      <SetVariable name="BgColorOverview_34">rgba(0, 27, 35, 120)</SetVariable>
+      <SetVariable name="BgColorOverview_12">#d8dde2</SetVariable>
+      <SetVariable name="BgColorOverview_34">#d8dde2</SetVariable>
       <SetVariable name="BgColorOverview_SamPre">#0f0f0f</SetVariable>
-      <SetVariable name="BgColorWaveform_12">#0f0f0e</SetVariable>
-      <SetVariable name="BgColorWaveform_34">#001b23</SetVariable>
+      <SetVariable name="BgColorWaveform_12">#e4e7eb</SetVariable>
+      <SetVariable name="BgColorWaveform_34">#e4e7eb</SetVariable>
       <SetVariable name="SignalColor_12">#e7c413</SetVariable>
       <SetVariable name="SignalColor_34">#09b2ae</SetVariable>
       <!-- default colors -->
       <SetVariable name="SignalHighColor">blue</SetVariable>
       <SetVariable name="SignalMidColor">green</SetVariable>
       <SetVariable name="SignalLowColor">red</SetVariable>
-      <SetVariable name="AxesColor">#ffffff</SetVariable>
-      <SetVariable name="BeatColor">#ffffff</SetVariable>
+      <SetVariable name="AxesColor">#555b61</SetVariable>
+      <SetVariable name="BeatColor">#555b61</SetVariable>
       <SetVariable name="PlayPosColor">#00c8ff</SetVariable>
       <SetVariable name="CueColor">#ff001c</SetVariable>
       <SetVariable name="LoopColor">#00ff00</SetVariable>
@@ -454,8 +455,8 @@
                   <ObjectName>WaveformSplitter</ObjectName>
                   <Orientation>vertical</Orientation>
                   <SizePolicy>me,min</SizePolicy>
-                  <SplitSizes>100,550</SplitSizes>
-                  <SplitSizesConfigKey>[Skin],stackedWaveforms_splitSize</SplitSizesConfigKey>
+                  <SplitSizes>170,480</SplitSizes>
+                  <SplitSizesConfigKey>[DJ-Sugar-Android],stackedWaveforms_splitSize_v2</SplitSizesConfigKey>
                   <Collapsible>0,0</Collapsible>
                   <Children>
 
@@ -495,9 +496,9 @@
                           </Children>
                         </WidgetGroup>
 
-                        <Template src="skins:LateNight/fx_rack.xml"/>
-                        <Template src="skins:LateNight/samplers_rack.xml"/>
-                        <Template src="skins:LateNight/mic_aux_rack.xml"/>
+                        <!-- DJ Sugar phone layout: FX, samplers and mic/aux racks
+                             are intentionally omitted to reserve vertical space
+                             for the two-deck waveforms and music library. -->
 
                         <SingletonContainer>
                           <ObjectName>LibrarySingleton</ObjectName>

@@ -59,6 +59,29 @@ namespace {
 
 const mixxx::Logger kLogger("SoundSourceProxy");
 
+QUrl playbackUrlForTrack(const TrackPointer& pTrack) {
+    if (!pTrack) {
+        return {};
+    }
+    const QUrl originalUrl = pTrack->getFileInfo().toQUrl();
+#if defined(Q_OS_ANDROID) && defined(__FFMPEG__)
+    const QString localPath = originalUrl.toLocalFile();
+    if (localPath.startsWith(QStringLiteral("/storage/")) ||
+            localPath.startsWith(QStringLiteral("/sdcard/"))) {
+        const QString privatePath =
+                mixxx::SoundSourceFFmpeg::prepareAndroidPrivateCopy(localPath);
+        if (!privatePath.isEmpty()) {
+            kLogger.info() << "[Android] Playback redirected to private audio copy:"
+                           << localPath << "->" << privatePath;
+            return QUrl::fromLocalFile(privatePath);
+        }
+        kLogger.warning() << "[Android] Could not prepare private audio copy for"
+                          << localPath << "; using original URL as fallback";
+    }
+#endif
+    return originalUrl;
+}
+
 bool registerSoundSourceProvider(
         mixxx::SoundSourceProviderRegistry* pProviderRegistry,
         const mixxx::SoundSourceProviderPointer& pProvider) {
@@ -446,7 +469,16 @@ SoundSourceProxy::SoundSourceProxy(
 
 SoundSourceProxy::SoundSourceProxy(TrackPointer pTrack)
         : m_pTrack(std::move(pTrack)),
-          m_url(m_pTrack ? m_pTrack->getFileInfo().toQUrl() : QUrl()),
+          m_url(playbackUrlForTrack(m_pTrack)),
+          m_providerRegistrations(allProviderRegistrationsForUrl(m_url)) {
+    findProviderAndInitSoundSource();
+}
+
+SoundSourceProxy::SoundSourceProxy(
+        TrackPointer pTrack,
+        const QUrl& playbackUrl)
+        : m_pTrack(std::move(pTrack)),
+          m_url(playbackUrl),
           m_providerRegistrations(allProviderRegistrationsForUrl(m_url)) {
     findProviderAndInitSoundSource();
 }

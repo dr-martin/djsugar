@@ -22,7 +22,14 @@ SimpleSignalWaveformWidget::SimpleSignalWaveformWidget(const QString& group, QWi
     addRenderer<WaveformRenderMark>();
 
     setAttribute(Qt::WA_NoSystemBackground);
+#ifdef Q_OS_ANDROID
+    // DJ Sugar overlays deck 2 on deck 1 in the shared beatmatching view.
+    // Preserve alpha so the red waveform below remains visible.
+    setAttribute(Qt::WA_TranslucentBackground);
+    setAttribute(Qt::WA_OpaquePaintEvent, false);
+#else
     setAttribute(Qt::WA_OpaquePaintEvent);
+#endif
 
     m_initSuccess = init();
 }

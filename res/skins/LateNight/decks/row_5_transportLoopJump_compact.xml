@@ -11,12 +11,12 @@
         <ObjectName>DeckRow_5_LoopCuesTransportCompact</ObjectName>
         <Layout>horizontal</Layout>
         <SizePolicy>p,max</SizePolicy>
-        <MaximumSize>360,</MaximumSize>
+        <MaximumSize>510,</MaximumSize>
         <Children>
 
           <WidgetGroup><!-- Play + PlayBlink + default dark background -->
             <Layout>stacked</Layout>
-            <Size>68f,26f</Size>
+            <Size>100f,48f</Size>
             <Children>
               <Template src="skins:LateNight/controls/button_2state_right_display.xml">
                 <SetVariable name="TooltipId">play_cue_set</SetVariable>
@@ -29,7 +29,7 @@
               </Template>
               <PushButton>
                 <ObjectName>PreviewIndicator</ObjectName>
-                <Size>68f,26f</Size>
+                <Size>100f,48f</Size>
                 <NumberStates>2</NumberStates>
                 <Connection>
                   <ConfigKey><Variable name="Group"/>,play</ConfigKey>
@@ -37,7 +37,7 @@
               </PushButton>
               <PushButton>
                 <ObjectName>PlayIndicator</ObjectName>
-                <Size>68f,26f</Size>
+                <Size>100f,48f</Size>
                 <NumberStates>2</NumberStates>
                 <Connection>
                   <ConfigKey><Variable name="Group"/>,play_indicator</ConfigKey>
@@ -49,7 +49,7 @@
           <CueButton>
             <TooltipId>cue_default_cue_gotoandstop</TooltipId>
             <ObjectName>CueDeck</ObjectName>
-            <Size>42f,26f</Size>
+            <Size>64f,48f</Size>
             <NumberStates>2</NumberStates>
             <RightClickIsPushButton>true</RightClickIsPushButton>
             <Group><Variable name="Group"/></Group>
@@ -107,8 +107,8 @@
                 <TooltipId>beatloop_size</TooltipId>
                 <ObjectName>Spinbox_<Variable name="BtnType"/></ObjectName>
                 <SizePolicy>me,min</SizePolicy>
-                <MinimumSize>46,26</MinimumSize>
-                <MaximumSize>72,26</MaximumSize>
+                <MinimumSize>68,48</MinimumSize>
+                <MaximumSize>94,48</MaximumSize>
                 <Value><Variable name="Group"/>,beatloop_size</Value>
                 <!-- disabled until 'highlight' property has been added to WBeatSpinBox / wbasewidget.
                 <Connection>
@@ -138,8 +138,8 @@
                 <TooltipId>beatjump_size</TooltipId>
                 <ObjectName>Spinbox_<Variable name="BtnType"/></ObjectName>
                 <SizePolicy>me,min</SizePolicy>
-                <MinimumSize>46,26</MinimumSize>
-                <MaximumSize>72,26</MaximumSize>
+                <MinimumSize>68,48</MinimumSize>
+                <MaximumSize>94,48</MaximumSize>
                 <Align>center</Align>
                 <Alignment>center</Alignment>
                 <Value><Variable name="Group"/>,beatjump_size</Value>
